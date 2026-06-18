@@ -1,0 +1,9 @@
+[submodule "services/reeftracker"]
+	path = services/reeftracker
+	url = https://github.com/loud3stsil3nce/ReefTracker.git
+[submodule "services/e2ee-messenger"]
+	path = services/e2ee-messenger
+	url = https://github.com/loud3stsil3nce/E2EE-Messaging-Project.git
+[submodule "services/shariahcompliantscreener"]
+	path = services/shariahcompliantscreener
+	url = https://github.com/loud3stsil3nce/shariahcompliantscreener.git
