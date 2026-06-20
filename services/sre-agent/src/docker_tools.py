@@ -243,9 +243,9 @@ def register_docker_tools(mcp: FastMCP):
             
         
     @mcp.tool()
-    def update_status_dashboard(status: str, result: str, notes: str) -> str:
+    async def update_status_dashboard(status: str, result: str, notes: str) -> str:
         """
-        Updates the operational status dashboard for the system whenever maintenance or anything is completed by the agent.
+        Updates the operational status dashboard for the system by saving metrics to the database.          
         """
         status_data = {
             "timestamp": datetime.utcnow().isoformat(),
@@ -262,7 +262,16 @@ def register_docker_tools(mcp: FastMCP):
             }
         }
         
-        with open(STATUS_FILE_PATH, "w") as f:
-            json.dump(status_data, f)
-            
-        return "✅ Dashboard status updated."
+        try:
+            async with async_session() as session:
+                async with session.begin():
+                    log_entry = AgentLog(
+                        container_name="shariahcompliantscreener-shariahscreener-1",
+                        log_level="INFO" if result == "success" else "ERROR",
+                        message=notes,
+                        status_snapshot=status_data
+                    )
+                    session.add(log_entry)
+            return "✅ Dashboard status updated in PostgreSQL database."
+        except Exception as e:
+            return f"Failed to update database: {str(e)}"

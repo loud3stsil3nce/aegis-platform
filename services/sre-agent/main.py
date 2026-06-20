@@ -1,1 +1,1 @@
-from database.models import AgentLog
+from src.db.models import AgentLog

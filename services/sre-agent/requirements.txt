@@ -3,4 +3,4 @@ SQLAlchemy==2.0.51
 typing_extensions==4.15.0
 mcp
 fastmcp
-
+asyncpg
