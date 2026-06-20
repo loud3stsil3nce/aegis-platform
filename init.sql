@@ -1,0 +1,4 @@
+CREATE DATABASE db_sre;                                                                                                                                                                                                                    
+CREATE DATABASE db_screener;                                                                                                                                                                                                               
+CREATE DATABASE db_reeftracker;                                                                                                                                                                                                            
+CREATE DATABASE db_e2ee_messenger;

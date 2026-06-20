@@ -1,6 +1,6 @@
 services:
   db:
-    image: postgres:15
+    image: postgres:15-alpine
     container_name: aegis_db
     restart: always
     environment:
@@ -10,14 +10,15 @@ services:
     ports:
       - "5433:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql 
+      - postgres_data:/var/lib/postgresql/data  
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U Rafiur -d aegis_platform"]
       interval: 5s
       timeout: 5s
       retries: 5
     networks:
-      - aegis-net
+      - data_tier
   
   sre-agent:
     build: ./services/sre-agent
@@ -29,7 +30,7 @@ services:
       db:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql://Rafiur:Rafiur123@db:5432/aegis_platform
+      DATABASE_URL: postgresql+asyncpg://Rafiur:Rafiur123@db:5432/db_sre 
       # Pass your API keys as environment variables
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
     volumes:
@@ -38,7 +39,8 @@ services:
       # Mount your project code if the agent needs to analyze it
       - .:/app/code:ro
     networks:
-      - aegis-net
+      - backend_tier
+      - data_tier
 
 
   shariah-screener:
@@ -49,14 +51,16 @@ services:
       - db
     environment:
       # Use the 'db' service name as the host
-      DATABASE_URL: postgresql://Rafiur:Rafiur123@db:5432/aegis_platform
+      DATABASE_URL: postgresql+asyncpg://Rafiur:Rafiur123@db:5432/db_screener
     ports:
       - "8501:8501"
     volumes:
       # Add this line to map your local code into the container
       - ./services/shariahcompliantscreener:/app:cached
     networks:
-      - aegis-net
+      - backend_tier
+      - data_tier
+      - frontend_tier
 
   reeftracker:
     image: mcr.microsoft.com/devcontainers/python:3.12
@@ -70,7 +74,7 @@ services:
       db:
         condition: service_healthy
     environment:
-      DATABASE_URL: "postgresql://Rafiur:Rafiur123@db:5432/aegis_platform"
+      DATABASE_URL: "postgresql://Rafiur:Rafiur123@db:5432/db_reeftracker"
       DJANGO_SETTINGS_MODULE: "ReefTracker.settings"
       DEBUG: "1"
     command: >
@@ -78,7 +82,9 @@ services:
                python manage.py migrate --noinput &&
                python manage.py runserver 0.0.0.0:8000"
     networks:
-      - aegis-net
+      - backend_tier
+      - data_tier
+      - frontend_tier
   
   
   
@@ -91,10 +97,12 @@ services:
         condition: service_healthy
     environment:
       
-      DATABASE_URL: postgresql+asyncpg://Rafiur:Rafiur123@db:5432/aegis_platform
+      DATABASE_URL: postgresql+asyncpg://Rafiur:Rafiur123@db:5432/db_e2ee_messenger
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:-default_secret_key}
     networks:
-      - aegis-net
+      - backend_tier
+      - data_tier
+      - frontend_tier
     ports:
       - "8080:8080"
 
@@ -103,5 +111,9 @@ volumes:
   postgres_data:
 
 networks:
-  aegis-net:
+  frontend_tier:
+    driver: bridge
+  backend_tier:
+    driver: bridge
+  data_tier:
     driver: bridge
