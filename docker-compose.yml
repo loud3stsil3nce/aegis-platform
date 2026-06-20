@@ -1,0 +1,107 @@
+services:
+  db:
+    image: postgres:15
+    container_name: aegis_db
+    restart: always
+    environment:
+      POSTGRES_USER: Rafiur
+      POSTGRES_PASSWORD: Rafiur123
+      POSTGRES_DB: aegis_platform
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U Rafiur -d aegis_platform"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - aegis-net
+  
+  sre-agent:
+    build: ./services/sre-agent
+    container_name: sre_agent
+    restart: unless-stopped
+    tty: true         # <--- Allocates a pseudo-TTY
+    stdin_open: true  # <--- Keeps stdin open even if not attached
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://Rafiur:Rafiur123@db:5432/aegis_platform
+      # Pass your API keys as environment variables
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+    volumes:
+      # lets the agent talk to the Docker daemon
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Mount your project code if the agent needs to analyze it
+      - .:/app/code:ro
+    networks:
+      - aegis-net
+
+
+  shariah-screener:
+    build: ./services/shariahcompliantscreener
+    container_name: shariahscreener
+    restart: unless-stopped
+    depends_on:
+      - db
+    environment:
+      # Use the 'db' service name as the host
+      DATABASE_URL: postgresql://Rafiur:Rafiur123@db:5432/aegis_platform
+    ports:
+      - "8501:8501"
+    volumes:
+      # Add this line to map your local code into the container
+      - ./services/shariahcompliantscreener:/app:cached
+    networks:
+      - aegis-net
+
+  reeftracker:
+    image: mcr.microsoft.com/devcontainers/python:3.12
+    container_name: reeftracker_app
+    working_dir: /workspaces
+    volumes:
+      - ./services/reeftracker:/workspaces:cached
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: "postgresql://Rafiur:Rafiur123@db:5432/aegis_platform"
+      DJANGO_SETTINGS_MODULE: "ReefTracker.settings"
+      DEBUG: "1"
+    command: >
+      bash -c "pip install -r requirements.txt &&
+               python manage.py migrate --noinput &&
+               python manage.py runserver 0.0.0.0:8000"
+    networks:
+      - aegis-net
+  
+  
+  
+  e2ee-messenger:
+    build: ./services/e2ee-messenger
+    container_name: e2ee_messenger
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      
+      DATABASE_URL: postgresql+asyncpg://Rafiur:Rafiur123@db:5432/aegis_platform
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-default_secret_key}
+    networks:
+      - aegis-net
+    ports:
+      - "8080:8080"
+
+
+volumes:
+  postgres_data:
+
+networks:
+  aegis-net:
+    driver: bridge

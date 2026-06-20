@@ -1,0 +1,5 @@
+setup.py
+aegis_db.egg-info/PKG-INFO
+aegis_db.egg-info/SOURCES.txt
+aegis_db.egg-info/dependency_links.txt
+aegis_db.egg-info/top_level.txt
