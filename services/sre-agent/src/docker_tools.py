@@ -7,6 +7,8 @@ import urllib.request
 import urllib.error
 import json
 from datetime import datetime
+from src.db.database import async_session                                                                     
+from src.db.models import AgentLog 
 
 PROJECT_ROOT = "/home/rafi/shariahcompliantscreener"
 STATUS_FILE_PATH = "/home/rafi/shariahcompliantscreener/status.json"
@@ -210,7 +212,7 @@ def register_docker_tools(mcp: FastMCP):
           
         
     @mcp.tool()
-    def update_and_restart_app() -> str:
+    async def update_and_restart_app() -> str:
         """
         Full Deployment Pipeline:
         1. Removes any rogue manual containers.
@@ -233,12 +235,12 @@ def register_docker_tools(mcp: FastMCP):
             )
             
             # Step 3: Success Reporting
-            update_status_dashboard("running", "success", "Pipeline complete: Cleanup, Rebuild, and Restart successful.")
+            await update_status_dashboard("running", "success", "Pipeline complete: Cleanup, Rebuild, and Restart successful.")
             return "✅ Pipeline successful: Rogue cleanup + Rebuild + Restart complete."
             
         except subprocess.CalledProcessError as e:
             # Step 4: Failure Reporting
-            update_status_dashboard("error", "failed", f"Pipeline crashed: {e.stderr[:50]}...")
+            await update_status_dashboard("error", "failed", f"Pipeline crashed: {e.stderr[:50]}...")
             return f"🚨 CRITICAL: Pipeline failed. Details: {e.stderr}"
             
         
