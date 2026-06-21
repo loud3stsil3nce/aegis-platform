@@ -38,6 +38,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       # Mount your project code if the agent needs to analyze it
       - .:/app/code:ro
+      - ./services/sre-agent:/app:cached
     networks:
       - backend_tier
       - data_tier
@@ -99,6 +100,8 @@ services:
       
       DATABASE_URL: postgresql+asyncpg://Rafiur:Rafiur123@db:5432/db_e2ee_messenger
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:-default_secret_key}
+    volumes:
+      - ./services/e2ee-messenger:/app:cached
     networks:
       - backend_tier
       - data_tier
