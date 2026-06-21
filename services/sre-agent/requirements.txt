@@ -4,3 +4,5 @@ typing_extensions==4.15.0
 mcp
 fastmcp
 asyncpg
+PyGithub
+
