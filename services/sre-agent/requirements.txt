@@ -5,4 +5,11 @@ mcp
 fastmcp
 asyncpg
 PyGithub
-
+fastapi
+uvicorn
+apscheduler
+anthropic
+openai
+pydantic
+cryptography
+jira

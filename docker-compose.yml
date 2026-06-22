@@ -29,10 +29,13 @@ services:
     depends_on:
       db:
         condition: service_healthy
-    environment:
-      DATABASE_URL: postgresql+asyncpg://Rafiur:Rafiur123@db:5432/db_sre 
-      # Pass your API keys as environment variables
+    environment:                                                                                                                                                                                                                                                                                
+      DATABASE_URL: postgresql+asyncpg://Rafiur:Rafiur123@db:5432/db_sre
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      JIRA_URL: ${JIRA_URL}
+      JIRA_USER_EMAIL: ${JIRA_USER_EMAIL}
+      JIRA_API_TOKEN: ${JIRA_API_TOKEN}
+      JIRA_PROJECT_KEY: ${JIRA_PROJECT_KEY}                                                                                                                                                                                                                                                     
     volumes:
       # lets the agent talk to the Docker daemon
       - /var/run/docker.sock:/var/run/docker.sock
@@ -42,6 +45,8 @@ services:
     networks:
       - backend_tier
       - data_tier
+    ports:
+      - "8002:8002"
 
 
   shariah-screener:
@@ -86,6 +91,7 @@ services:
       - ./services/reeftracker:/workspaces:cached
     ports:
       - "8000:8000"
+      - "8003:8003"
     depends_on:
       db:
         condition: service_healthy
@@ -94,9 +100,10 @@ services:
       DJANGO_SETTINGS_MODULE: "ReefTracker.settings"
       DEBUG: "1"
     command: >
-      bash -c "pip install -r requirements.txt &&
-               python manage.py migrate --noinput &&
-               python manage.py runserver 0.0.0.0:8000"
+      bash -c "python -m venv /opt/venv &&
+               /opt/venv/bin/pip install -r requirements.txt &&
+               /opt/venv/bin/python manage.py migrate --noinput &&
+               (/opt/venv/bin/python mcp_server.py & exec /opt/venv/bin/python manage.py runserver 0.0.0.0:8000)"
     networks:
       - backend_tier
       - data_tier
