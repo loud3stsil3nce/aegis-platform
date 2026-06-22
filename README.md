@@ -123,11 +123,11 @@ docker-compose up --build
 
 ### 3. Service Access Points
 Once online, you can access the platform services at:
-*   **Shariah Screener Dashboard**: [http://localhost:3000](http://localhost:3000)
-*   **Shariah Screener API Docs**: [http://localhost:8001/docs](http://localhost:8001/docs)
-*   **ReefTracker Interface**: [http://localhost:8000](http://localhost:8000)
-*   **E2EE Messenger Chat**: [http://localhost:8080](http://localhost:8080)
-*   **PostgreSQL Port**: `localhost:5433` (Username: `Rafiur`, DB: `aegis_platform`)
+*   **Shariah Screener Dashboard**: TBD
+*   **Shariah Screener API Docs**: TBD
+*   **ReefTracker Interface**: TBD
+*   **E2EE Messenger Chat**: TBD
+*   **PostgreSQL Port**: 
 
 ### 4. Running Test Suites
 To run the automated E2E and unit test suite for the Shariah Screener service inside Docker:
