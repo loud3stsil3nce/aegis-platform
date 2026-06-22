@@ -11,18 +11,30 @@ db_e2ee_messenger: App state.
 Step 1.3: State Migration & App Integration: Deprecate all SQLite/JSON stores. Refactor sre-agent and shariah-screener to execute CRUD operations via async PostgreSQL drivers (e.g., asyncpg). Configure the Django ReefTracker app to push environment logs to db_reeftracker.
 Step 1.4: Stateless SRE Expansion (GitOps Tooling): Expand the SRE agent with an API-driven GitOps module (src/vcs_tools.py). Do not clone repositories locally. Expose tools (get_file_from_api, modify_in_memory, create_branch, commit_via_api, create_pr) using the GitHub REST API and a fine-grained PAT. Enforce a Human-in-the-Loop (HITL) approval gate before PR merges.
 
-Phase 2: Presentation Layer Decoupling (UI Modernization) Retire Streamlit. Implement a production-grade thin client.
-Tech Stack: Next.js (React), TypeScript, Tailwind CSS, Vercel.
-Step 2.1: Initialize Next.js: Scaffold Next.js application in aegis-platform/frontend (npx create-next-app).
-Step 2.2: Build the Control Center UI: Create isolated dashboard routes and Tailwind-styled tabs for "System Health" (/sre), "Shariah Audit" (/finance), and "Reef Logs" (/aquatics).
-Step 2.3: API Integration: Implement strictly typed REST/GraphQL fetch utilities in TypeScript to communicate with existing FastAPI/Django backends. Never process business logic on the client.
-Step 2.4: The Approval Gate UI: Build a specific "Pending Actions" widget where you can manually click [APPROVE] or [REJECT] for agent-proposed trades or code changes.
+Phase 2: Presentation Layer Decoupling (UI Modernization - Shariah Screener) [COMPLETE] Retire Streamlit and decouple it into a production-grade decoupled web application to enable independent domain hosting and multi-tenant scaling.
+Tech Stack: Next.js (React), TypeScript, Tailwind CSS v4, FastAPI (Python), Docker.
+Step 2.1: Expose the REST API (FastAPI Backend):
+- Add `fastapi` and `uvicorn` to the Python dependencies of the Shariah Screener service.
+- Implement a robust REST API in `services/shariahcompliantscreener/src/api.py` to expose compliance universes (Halal/Doubtful/Rejections), trigger ingestion/scans, run portfolio optimizations, and save overrides.
+- Update Dockerfile and `docker-compose.yml` to run the FastAPI app on port 8001 instead of Streamlit on 8501.
+Step 2.2: Scaffold the Next.js Frontend:
+- Scaffold the Next.js React client in `services/shariahcompliantscreener/frontend` using TypeScript, Tailwind CSS v4, and App Router.
+- Set up styling tokens (colors, fonts, dark/light modes) matching a premium dashboard.
+Step 2.3: Build Frontend Views & Forms:
+- Build searchable tables with search, filter, and export for the Shariah compliance universes.
+- Build a portfolio optimization form mapping constraints (weights, target volatility) and rendering visual allocations using Recharts.
+- Build a dialog form to propose/save manual overrides for individual stock tickers.
+Step 2.4: API Client & Container Integration:
+- Implement typed fetch utility functions in the frontend pointing to the FastAPI backend (`http://localhost:8001`).
+- Mount the local frontend code as a volume in `docker-compose.yml` for active hot-reloads and containerized startup.
+
 Phase 3: Headless Orchestration & MCP Transport Shift Remove Claude Desktop from the loop. Transition the agent from process-bound stdio to distributed networking, running autonomously in the background.
 Tech Stack: FastAPI (Python), LangChain/Pydantic AI, APScheduler/Cron, SSE (Server-Sent Events), JSON-RPC 2.0.
 Step 3.1: The Runner Service (Transport Shift): Wrap the SRE Agent in a FastAPI server exposing HTTP/SSE endpoints for remote MCP communication. Initialize the LLM via the Anthropic/OpenAI API directly.
 Step 3.2: Tool Registration: Programmatically register your MCP servers (SRE, Screener, ReefTracker) to this runner.
 Step 3.3: Autonomous Diagnostic Looping (Cron): Implement APScheduler or temporal workflows. Schedule the runner to wake up every 30 minutes, assess SRE health, run compliance checks on a watchlist of stocks, and push results to PostgreSQL.
 Step 3.4: Security Gate: Implement programmatic Human-in-the-Loop (HITL) manual overrides for destructive actions (e.g., container restarts, live trading).
+
 Phase 4: Quantitative Engine, Risk Limits & Agentic Memory Finalize financial logic and give your agent the ability to read documentation (AAOIFI, codebase) to debug and propose fixes.
 Tech Stack: Pinecone (Vector DB), OpenAI/Anthropic Embeddings API.
 Step 4.1: Finalize Financial Math: Finalize AAOIFI compliance math in screener.py.
@@ -30,21 +42,25 @@ Step 4.2: Implement Risk Guardrails: Implement portfolio optimizer bounds (e.g.,
 Step 4.3: Ingestion Pipeline: Write a script that parses the AAOIFI PDF standards and your local E2EE app codebase, converts them to vector embeddings, and uploads them to Pinecone.
 Step 4.4: Vector Search Tool: Add a tool to your agent: search_knowledge_base(query).
 Step 4.5: RAG Implementation: When the agent detects an error in your codebase, force it to query Pinecone for the relevant source code before proposing a fix.
+
 Phase 5: Automated Remediation & Execution Pipelines (The "Hands") Allow the agent to take real-world actions, guarded by math and strict security policies.
 Tech Stack: GitHub API (PyGithub), Alpaca API / Interactive Brokers API, Docker SDK.
 Step 5.1: Safe Trading: Integrate trade execution APIs strictly gated by Phase 4 compliance output. Hardcode math-based risk constraints (e.g., VaR limits, max 5% portfolio allocation) that the LLM cannot override.
 Step 5.2: Code Remediation: Write a tool that allows the agent to checkout a Git branch, modify a file, and open a Pull Request via the GitHub API (never push directly to main).
 Step 5.3: Pentesting Sandbox: Create an isolated Docker container for the agent to run synthetic pentests against your E2EE chat app.
+
 Phase 6: Enterprise Observability Scale your telemetry to look like a Big Tech infrastructure pipeline.
 Tech Stack: OpenTelemetry (OTel), Prometheus, Grafana, PagerDuty.
 Step 6.1: OTel Instrumentation: Add OpenTelemetry traces to your FastAPI and Django backends so you can measure exact function execution times.
 Step 6.2: Grafana Dashboards: Connect SRE telemetry to Prometheus/Grafana or Datadog for robust log parsing and alerting. Visualize P95 latency and error rates.
 Step 6.3: Incident Alerting: Set up a free PagerDuty tier. Configure Grafana to trigger a PagerDuty phone call if the SRE agent detects a critical container failure.
+
 Phase 7: The Polyglot Pivot (Performance Optimization) Rewrite bottleneck microservices into compiled, statically typed languages to demonstrate mastery of multiple ecosystems.
 Tech Stack: Go (Golang), Java (Spring Boot), Maven/Gradle.
 Step 7.1: Go for SRE: Port Python SRE Agent to Go for native concurrency and efficient Docker Daemon SDK interactions.
 Step 7.2: Java for Finance: Port Shariah Screener backend to Java (Spring Boot) for high-precision financial mathematics and robust OOP.
 Step 7.3: Re-link the MCP: Update your Headless Orchestrator (Phase 3) to connect to the new Go and Java binaries instead of the old Python scripts.
+
 Phase 8: Hub-and-Spoke SaaS Deployment (Production) Extract the SRE Control Plane from the Monorepo and deploy it as a multi-tenant, cloud-native SaaS orchestrator using automated CI/CD pipelines.
 Tech Stack: AWS (EC2, ECS/Fargate, RDS), API Gateway, Terraform/Pulumi, GitHub Actions, Docker Hub, OIDC/mTLS.
 Step 8.1: CI/CD Setup: Write GitHub Actions .yml workflows to automatically test code and build Docker images upon push.

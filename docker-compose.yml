@@ -54,7 +54,7 @@ services:
       # Use the 'db' service name as the host
       DATABASE_URL: postgresql+asyncpg://Rafiur:Rafiur123@db:5432/db_screener
     ports:
-      - "8501:8501"
+      - "8001:8001"
     volumes:
       # Add this line to map your local code into the container
       - ./services/shariahcompliantscreener:/app:cached
@@ -62,6 +62,21 @@ services:
       - backend_tier
       - data_tier
       - frontend_tier
+  shariah-screener-ui:
+    build: ./services/shariahcompliantscreener/frontend
+    container_name: shariahscreener_ui
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./services/shariahcompliantscreener/frontend:/app:cached 
+      - /app/node_modules
+    networks:                                                                                                                                                                                                                                    
+      - frontend_tier                                                                                                                                                                                                                            
+    depends_on:
+      - shariah-screener
+
+
 
   reeftracker:
     image: mcr.microsoft.com/devcontainers/python:3.12
