@@ -32,10 +32,12 @@ services:
     environment:                                                                                                                                                                                                                                                                                
       DATABASE_URL: postgresql+asyncpg://Rafiur:Rafiur123@db:5432/db_sre
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
       JIRA_URL: ${JIRA_URL}
       JIRA_USER_EMAIL: ${JIRA_USER_EMAIL}
       JIRA_API_TOKEN: ${JIRA_API_TOKEN}
       JIRA_PROJECT_KEY: ${JIRA_PROJECT_KEY}                                                                                                                                                                                                                                                     
+      GITHUB_PAT: ${GITHUB_PAT}
     volumes:
       # lets the agent talk to the Docker daemon
       - /var/run/docker.sock:/var/run/docker.sock
@@ -76,6 +78,7 @@ services:
     volumes:
       - ./services/shariahcompliantscreener/frontend:/app:cached 
       - /app/node_modules
+      - /app/.next
     networks:                                                                                                                                                                                                                                    
       - frontend_tier                                                                                                                                                                                                                            
     depends_on:

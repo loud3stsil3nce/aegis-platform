@@ -1,4 +1,5 @@
 MASTER PLAN -- mark as complete after complete.
+note to self: docker compose up -d servicename(like shariah-screener) --build
 
 Phase 1: Bounded Contexts & Data Consolidation (Monorepo Initialization) [COMPLETE] Establish the local development environment using a single repository with isolated microservices. Move away from local JSON/SQLite to a unified, multi-tenant relational database for cross-project state tracking.
 Tech Stack: Docker Compose, PostgreSQL 15+, SQLAlchemy/asyncpg, GitHub REST API.

@@ -4,19 +4,19 @@ Aegis Platform is a high-performance, containerized monorepo hosting multiple sp
 
 ```mermaid
 graph TD
-    subgraph Frontend Tier (Public Ports)
+    subgraph frontend ["Frontend Tier (Public Ports)"]
         UI_Screener[Next.js Screener UI<br>Port 3000]
         UI_Reef[Django ReefTracker UI<br>Port 8000]
         UI_Messenger[Static Messenger UI<br>Port 8080]
     end
 
-    subgraph Backend Tier (Isolated Internal)
+    subgraph backend ["Backend Tier (Isolated Internal)"]
         API_Screener[FastAPI Screener Backend<br>Port 8001]
         API_Messenger[FastAPI Messenger Backend<br>Port 8080]
         SRE_Agent[SRE Agent Worker]
     end
 
-    subgraph Data Tier (Protected Internal)
+    subgraph data ["Data Tier (Protected Internal)"]
         DB[(aegis_db<br>Postgres 15)]
         DB_SRE[(db_sre)]
         DB_Screener[(db_screener)]

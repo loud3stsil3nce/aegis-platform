@@ -1,10 +1,15 @@
 import os
 import json
-from github import Github
+from typing import Annotated
+from github import Github, UnknownObjectException
 from fastmcp import FastMCP
 from src.db.database import async_session
 from src.db.models import AuditTrail
 from sqlalchemy import select
+import contextvars
+
+active_issue_key: contextvars.ContextVar[str | None] = contextvars.ContextVar("active_issue_key", default=None)
+
 
 GITHUB_PAT = os.getenv("GITHUB_PAT")
 
@@ -16,7 +21,11 @@ def get_github_client():
 def register_vcs_tools(mcp: FastMCP):                                                                                                                                                     
                                                                                                                                                                                               
     @mcp.tool()                                                                                                                                                                           
-    def get_file_from_api(repo_name: str, path: str, ref: str = "main") -> str:                                                                                                           
+    def get_file_from_api(
+        repo_name: Annotated[str, "The GitHub repository name in 'owner/repo' format (e.g. 'loud3stsil3nce/aegis-platform')"],
+        path: Annotated[str, "The file path within the repository (e.g. 'services/sre-agent/server.py')"],
+        ref: Annotated[str, "The branch name, commit SHA, or tag to fetch from"] = "main"
+    ) -> str:                                                                                                           
         """                                                                                                                                                                               
         Fetches the content of a file directly from the GitHub repository via REST API.                                                                                                   
         No local cloning occurs.                                                                                                                                                          
@@ -30,7 +39,11 @@ def register_vcs_tools(mcp: FastMCP):
             return f"Failed to retrieve file: {str(e)}"                                                                                                                                   
                                                                                                                                                                                             
     @mcp.tool()                                                                                                                                                                           
-    def create_branch(repo_name: str, new_branch: str, base_branch: str = "main") -> str:                                                                                                 
+    def create_branch(
+        repo_name: Annotated[str, "The GitHub repository name in 'owner/repo' format (e.g. 'loud3stsil3nce/aegis-platform')"],
+        new_branch: Annotated[str, "The name of the new branch to create (e.g. 'feature/diagnostics')"],
+        base_branch: Annotated[str, "The name of the base branch to branch off of"] = "main"
+    ) -> str:                                                                                                 
         """                                                                                                                                                                               
         Creates a new branch on GitHub via REST API.                                                                                                                                      
         """                                                                                                                                                                               
@@ -43,28 +56,75 @@ def register_vcs_tools(mcp: FastMCP):
         except Exception as e:                                                                                                                                                            
             return f"Failed to create branch: {str(e)}"                                                                                                                                   
                                                                                                                                                                                             
+    @mcp.tool()
+    def commit_file_change(
+        repo_name: Annotated[str, "The GitHub repository name in 'owner/repo' format (e.g. 'loud3stsil3nce/aegis-platform')"],
+        path: Annotated[str, "The file path within the repository to modify or create"],
+        new_content: Annotated[str, "The full content to write to the file"],
+        commit_message: Annotated[str, "The commit message"],
+        branch: Annotated[str | None, "The branch name to commit the change to (falls back to default branch if not specified)"] = None
+    ) -> str:
+        """
+        Modifies or creates a file in-memory and commits it directly to a branch via REST API.
+        """
+        try:
+            g = get_github_client()
+            repo = g.get_repo(repo_name)
+            
+            # Determine target branch (fallback to issue-specific or generic branch if not specified)
+            issue_key = active_issue_key.get()
+            if branch:
+                target_branch = branch
+            elif issue_key:
+                target_branch = f"issue/{issue_key}-sre-changes"
+            else:
+                target_branch = "SRE_Agent"
+            
+            # Check if target branch exists. If not, create it from the default branch.
+            try:
+                repo.get_branch(target_branch)
+            except UnknownObjectException:
+                if target_branch == repo.default_branch:
+                    return f"Failed to commit file change: default branch '{target_branch}' does not exist."
+                try:
+                    base_ref = repo.get_branch(repo.default_branch)
+                    repo.create_git_ref(ref=f"refs/heads/{target_branch}", sha=base_ref.commit.sha)
+                except Exception as create_branch_err:
+                    return f"Failed to create branch '{target_branch}': {str(create_branch_err)}"
+            
+            # Retrieve file if it exists, to get its SHA for update
+            try:
+                contents = repo.get_contents(path, ref=target_branch)
+                # File exists, so update it
+                repo.update_file(
+                    path=path,
+                    message=commit_message,
+                    content=new_content,
+                    sha=contents.sha,
+                    branch=target_branch
+                )
+                return f"✅ File '{path}' successfully modified and committed to branch '{target_branch}'."
+            except UnknownObjectException:
+                # File does not exist, so create it
+                repo.create_file(
+                    path=path,
+                    message=commit_message,
+                    content=new_content,
+                    branch=target_branch
+                )
+                return f"✅ File '{path}' successfully created and committed to branch '{target_branch}'."
+        except Exception as e:
+            return f"Failed to commit file change: {str(e)}"
+
     @mcp.tool()                                                                                                                                                                           
-    def commit_file_change(repo_name: str, path: str, new_content: str, commit_message: str, branch: str) -> str:                                                                         
-        """                                                                                                                                                                               
-        Modifies a file in-memory and commits it directly to a branch via REST API.                                                                                                       
-        """                                                                                                                                                                               
-        try:                                                                                                                                                                              
-            g = get_github_client()                                                                                                                                                       
-            repo = g.get_repo(repo_name)                                                                                                                                                  
-            contents = repo.get_contents(path, ref=branch)                                                                                                                                
-            repo.update_file(                                                                                                                                                             
-                path=path,                                                                                                                                                                
-                message=commit_message,                                                                                                                                                   
-                content=new_content,                                                                                                                                                      
-                sha=contents.sha,                                                                                                                                                         
-                branch=branch                                                                                                                                                             
-            )                                                                                                                                                                             
-            return f"✅ File '{path}' successfully modified and committed to branch '{branch}'."                                                                                          
-        except Exception as e:                                                                                                                                                            
-            return f"Failed to commit file change: {str(e)}"                                                                                                                              
-                                                                                                                                                                                            
-    @mcp.tool()                                                                                                                                                                           
-    async def create_pr(repo_name: str, title: str, body: str, head_branch: str, base_branch: str = "main", approved_action_id: int = None) -> str:                                       
+    async def create_pr(
+        repo_name: Annotated[str, "The GitHub repository name in 'owner/repo' format (e.g. 'loud3stsil3nce/aegis-platform')"],
+        title: Annotated[str, "The title of the pull request"],
+        body: Annotated[str, "The detailed description or body of the pull request"],
+        head_branch: Annotated[str, "The source branch containing the changes"],
+        base_branch: Annotated[str, "The destination branch to merge into"] = "main",
+        approved_action_id: Annotated[int, "The SRE Audit Trail Action ID that has been approved (optional)"] = None
+    ) -> str:                                                                                                      
         """                                                                                                                                                                               
         Submits a Pull Request on GitHub.                                                                                                                                                 
         Gated by a Human-in-the-Loop (HITL) approval mechanism.                                                                                                                           
@@ -132,3 +192,80 @@ def register_vcs_tools(mcp: FastMCP):
             )
         except Exception as e:
             return f"Failed to process PR: {str(e)}"
+
+    @mcp.tool()
+    def list_branches(
+        repo_name: Annotated[str, "The GitHub repository name in 'owner/repo' format (e.g. 'loud3stsil3nce/aegis-platform')"]
+    ) -> str:
+        """
+        Lists all branches in the specified GitHub repository.
+        """
+        try:
+            g = get_github_client()
+            repo = g.get_repo(repo_name)
+            branches = [b.name for b in repo.get_branches()]
+            if not branches:
+                return f"No branches found in repository '{repo_name}'."
+            return f"Branches in '{repo_name}':\n" + "\n".join(f"- {b}" for b in branches)
+        except Exception as e:
+            return f"Failed to list branches: {str(e)}"
+
+    @mcp.tool()
+    def list_files_in_branch(
+        repo_name: Annotated[str, "The GitHub repository name in 'owner/repo' format (e.g. 'loud3stsil3nce/aegis-platform')"],
+        ref: Annotated[str, "The branch name, commit SHA, or tag to list files from-- by default it is main unless it is specified otherwise"] = "main",
+        path_filter: Annotated[str | None, "If specified, only paths containing this substring (case-insensitive) will be returned"] = None
+    ) -> str:
+        """
+        Recursively lists all files within a specific branch or ref in the repository.
+        Can optionally filter results by path substring.
+        """
+        try:
+            g = get_github_client()
+            repo = g.get_repo(repo_name)
+            
+            # Resolve the reference/branch to get the commit SHA
+            try:
+                branch = repo.get_branch(ref)
+                sha = branch.commit.sha
+            except UnknownObjectException:
+                # If it's not a branch, try accessing it directly as a ref/commit/tag
+                try:
+                    commit = repo.get_commit(ref)
+                    sha = commit.sha
+                except Exception:
+                    return f"Failed to find branch or ref '{ref}' in repository '{repo_name}'."
+            
+            # Retrieve the recursive tree
+            tree = repo.get_git_tree(sha=sha, recursive=True)
+            
+            # Filter and collect files (blobs)
+            files = []
+            for element in tree.tree:
+                if element.type == 'blob':  # 'blob' is a file
+                    path = element.path
+                    if path_filter:
+                        if path_filter.lower() in path.lower():
+                            files.append(path)
+                    else:
+                        files.append(path)
+            
+            if not files:
+                return f"No files found in '{ref}' matching the filter." if path_filter else f"No files found in '{ref}'."
+            
+            # Format and limit results to prevent context overflow
+            max_results = 200
+            total_count = len(files)
+            truncated = False
+            if total_count > max_results:
+                files = files[:max_results]
+                truncated = True
+                
+            result_str = f"Found {total_count} files in reference '{ref}':\n"
+            result_str += "\n".join(f"- {f}" for f in files)
+            if truncated:
+                result_str += f"\n\n... and {total_count - max_results} more files. Use a path_filter to narrow down the search."
+                
+            return result_str
+        except Exception as e:
+            return f"Failed to list files: {str(e)}"

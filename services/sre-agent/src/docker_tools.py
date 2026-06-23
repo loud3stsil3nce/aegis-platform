@@ -10,8 +10,8 @@ from datetime import datetime
 from src.db.database import async_session                                                                     
 from src.db.models import AgentLog 
 
-PROJECT_ROOT = "/home/rafi/shariahcompliantscreener"
-STATUS_FILE_PATH = "/home/rafi/shariahcompliantscreener/status.json"
+PROJECT_ROOT = "/home/rafi/projects/aegis-platform/services/shariahcompliantscreener"
+STATUS_FILE_PATH = "/home/rafi/projects/aegis-platform/services/shariahcompliantscreener/status.json"
 def register_docker_tools(mcp: FastMCP):
 
     @mcp.tool()
