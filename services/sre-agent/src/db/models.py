@@ -38,3 +38,13 @@ class AuditTrail(Base):
     target: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)                                                                                                                                                              
     status: Mapped[str] = mapped_column(String(20), default="PENDING")  # PENDING, APPROVED, REJECTED, SUCCESS, FAILED                                                                                                                     
     details: Mapped[Optional[str]] = mapped_column(Text, nullable=True) 
+
+class KnowledgeIngestionRun(Base):
+    __tablename__ = "knowledge_ingestion_runs"
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    source_type: Mapped[str] = mapped_column(String(50))  # "aaoifi_pdf" | "codebase"
+    source_path: Mapped[str] = mapped_column(Text)
+    chunks_upserted: Mapped[int] = mapped_column()
+    run_at: Mapped[datetime.datetime] = mapped_column(default=datetime.datetime.utcnow)
+    status: Mapped[str] = mapped_column(String(20))  # "success" | "failed"
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)

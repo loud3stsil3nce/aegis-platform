@@ -1,6 +1,7 @@
 MASTER PLAN -- mark as complete after complete.
 note to self: docker compose up -d servicename(like shariah-screener) --build
-
+ docker compose down -v          # -v wipes the DB volume (required since image changed)
+ docker compose up -d --build    # rebuilds all containers with new image + deps
 Phase 1: Bounded Contexts & Data Consolidation (Monorepo Initialization) [COMPLETE] Establish the local development environment using a single repository with isolated microservices. Move away from local JSON/SQLite to a unified, multi-tenant relational database for cross-project state tracking.
 Tech Stack: Docker Compose, PostgreSQL 15+, SQLAlchemy/asyncpg, GitHub REST API.
 Step 1.1: Network Segregation & Container Provisioning: Configure docker-compose.yml with strict bridge networks (frontend_tier, backend_tier, data_tier). Provision a single PostgreSQL container on the data_tier.
@@ -277,3 +278,229 @@ shariahscreener      Up 2 minutes            0.0.0.0:8001->8001/tcp
 shariahscreener_ui   Up About an hour        0.0.0.0:3000->3000/tcp
 sre_agent            Up 8 minutes            0.0.0.0:8002->8002/tcp
 ```
+
+---
+
+### Phase 4 Refinements & Quantitative Engine Architecture (Added June 2026)
+
+#### Pre-Work Observations (from Phase 3 code audit)
+- `services/sre-agent/processed_comments.json` is a runtime flat file tracking processed Jira comment IDs. Migrate to `db_sre.audit_trails` in step 4.1.7 for true statefulness.
+- `screener.py`'s `run_screener()` still reads/writes via **SQLite** (`sqlite_master`, `to_sql()`). The `api.py` async layer reads results from Postgres (`HalalUniverse`, etc.) but the screener itself computes into SQLite first. This dual-database pattern is the primary target for Step 4.1.
+
+#### Detailed Micro-Steps
+
+##### Step 4.1 — Finalize AAOIFI Financial Math in `screener.py`
+
+**Goal**: Harden compliance math to be fully AAOIFI-aligned and eliminate the dual SQLite/Postgres pattern.
+
+- **4.1.1** In `services/shariahcompliantscreener/src/analysis/screener.py`, remove the `get_db()` SQLite `conn` path entirely. Refactor `run_screener()` to accept a SQLAlchemy `AsyncSession` as a parameter instead of opening its own connection.
+- **4.1.2** Replace `pd.read_sql_query(..., conn)` with async SQLAlchemy select queries against `Stock` and `ManualOverride` Postgres models.
+- **4.1.3** Replace final `df.to_sql("halal_universe", conn, ...)` calls with async bulk upserts into `HalalUniverse`, `DoubtfulUniverse`, `HalalRejection` Postgres tables using `session.merge()` or `insert().on_conflict_do_update()`.
+- **4.1.4** Update `api.py`'s `run_screener_scan()` MCP tool to pass the active `AsyncSession` into the new async `run_screener(session)`.
+- **4.1.5** Add a `STANDARDS_REFERENCE` docstring block at the top of `screener.py` mapping each threshold constant to its AAOIFI No. 21 or MSCI Sharia Index source:
+  - `MAX_DEBT_RATIO = 0.30` → AAOIFI Standard No. 21: total interest-bearing debt / market cap ≤ 30%
+  - `MAX_CASH_RATIO = 0.30` → AAOIFI Standard No. 21: liquid assets / market cap ≤ 30%
+  - `MAX_HARAM_INCOME_RATIO = 0.05` → AAOIFI Standard No. 21: haram revenue / total revenue ≤ 5%
+  - `MIN_TANGIBILITY_RATIO = 0.30` → MSCI/S&P Sharia practice (tangible assets / total assets ≥ 30%; derived, not explicit AAOIFI No. 21)
+  - `MAX_RECEIVABLES_RATIO = 0.45` → Currently calculated but **not gating** `is_halal`; validate and document whether it should gate per AAOIFI practice.
+- **4.1.6** Add a formal docstring to `get_market_cap()` documenting the three-tier fallback: market cap → book value of equity (AAOIFI No. 21: total assets − total liabilities) → total assets.
+- **4.1.7** Migrate `processed_comments.json` in `sre-agent` to a new `jira_comment_id` indexed column or processed flag on `AuditTrail` in `db_sre`. Remove the JSON file. Update `server.py` read/write logic accordingly.
+
+##### Step 4.2 — Implement Portfolio Risk Guardrails
+
+**Goal**: Enforce hard, math-based constraints in the optimizer that the LLM agent cannot override.
+
+- **4.2.1** In `services/shariahcompliantscreener/src/analysis/optimizer.py`, implement `calculate_var(weights, log_returns, confidence=0.95, horizon_days=1)` using historical simulation: compute portfolio daily P&L, sort ascending, and return the `(1 - confidence)`-th percentile as a positive loss value.
+- **4.2.2** Add a `max_var` parameter to `run_optimizer()` (default `0.02` — max 2% daily VaR at 95% confidence). Wire it as a `scipy.optimize` inequality constraint: `target_max_var - calculate_var(x, log_returns) >= 0`.
+- **4.2.3** Include `VaR_95` in the returned results dict alongside `expected_return` and `volatility`.
+- **4.2.4** Harden the asset concentration cap: after `optimal = minimize(...)`, add a post-optimization check — clip any weight exceeding `max_weight`, then re-normalize so weights sum to 1. Log a warning to `AgentLog` in `db_sre` if any clipping occurs.
+- **4.2.5** In `services/shariahcompliantscreener/src/api.py`, add endpoint `GET /api/portfolio/risk-profile` that calls `run_optimizer()` and returns `expected_return`, `volatility`, `VaR_95`, `max_concentration`, `sector_exposure` as JSON.
+- **4.2.6** Add a new MCP tool `get_portfolio_risk_profile() -> str` in `api.py` so the SRE orchestrator can autonomously query live risk metrics during diagnostic sweeps.
+
+##### Step 4.3 — AAOIFI PDF + Codebase Ingestion Pipeline (Pinecone)
+
+**Goal**: Build the vector embedding pipeline so the agent can query AAOIFI standards and the codebase for RAG.
+
+- **4.3.1** Add to `services/sre-agent/requirements.txt`: `pinecone-client>=3.0.0`, `pdfplumber>=0.9.0`, `tiktoken>=0.5.0`. Verify `openai>=1.0.0` is present (needed for embeddings; may already exist from LLM fallback).
+- **4.3.2** Create `services/sre-agent/scripts/setup_pinecone.py`: initialize a Pinecone serverless index named `aegis-knowledge` with `dimension=1536` (OpenAI `text-embedding-3-small`) and `metric="cosine"` on AWS `us-east-1`. Script must be idempotent (skip creation if index already exists).
+- **4.3.3** Create `services/sre-agent/scripts/ingest_aaoifi.py`:
+  - Accept path to the AAOIFI Standard No. 21 PDF as a CLI argument.
+  - Use `pdfplumber` to extract text page-by-page.
+  - Chunk text into ~500-token windows with 50-token overlap using `tiktoken` (`cl100k_base` encoding).
+  - Generate embeddings via OpenAI `text-embedding-3-small`.
+  - Upsert to Pinecone with metadata: `{"source": "AAOIFI_Standard_21", "page": N, "chunk": K}`.
+  - Write a `KnowledgeIngestionRun` row to `db_sre` upon completion.
+- **4.3.4** Create `services/sre-agent/scripts/ingest_codebase.py`:
+  - Walk the `services/` directory; include `*.py` files only.
+  - Use `ast.parse` to split each file at top-level function and class boundaries.
+  - Generate an embedding per code chunk and upsert with metadata: `{"source": "codebase", "file": relative_path, "symbol": function_or_class_name}`.
+  - Skip `venv/`, `.venv/`, `__pycache__/`, `node_modules/` directories.
+  - Write a `KnowledgeIngestionRun` row to `db_sre` upon completion.
+- **4.3.5** Add `KnowledgeIngestionRun` model to `services/sre-agent/src/db/models.py`:
+  ```python
+  class KnowledgeIngestionRun(Base):
+      __tablename__ = "knowledge_ingestion_runs"
+      id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+      source_type: Mapped[str]          # "aaoifi_pdf" | "codebase"
+      source_path: Mapped[str]
+      chunks_upserted: Mapped[int]
+      run_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
+      status: Mapped[str]               # "success" | "failed"
+      error_message: Mapped[Optional[str]] = mapped_column(nullable=True)
+  ```
+- **4.3.6** Run `alembic revision --autogenerate -m "add_knowledge_ingestion_runs"` and `alembic upgrade head`. Update `init.sql` with the new table DDL for fresh-container bootstrapping.
+
+##### Step 4.4 — Vector Search Tool for the SRE Agent
+
+**Goal**: Expose `search_knowledge_base(query)` as an MCP-registered local tool available to the orchestrator.
+
+- **4.4.1** Create `services/sre-agent/src/knowledge_tools.py`. Implement `register_knowledge_tools(mcp: FastMCP)` which registers:
+  ```python
+  @mcp.tool()
+  async def search_knowledge_base(query: str, top_k: int = 5) -> str:
+      """
+      Search AAOIFI compliance standards and the Aegis codebase for context
+      relevant to the given query. Always call this before proposing any code
+      fix or compliance ratio override.
+      """
+      # 1. Embed query via OpenAI text-embedding-3-small
+      # 2. Query Pinecone index 'aegis-knowledge' with top_k matches
+      # 3. Format each result: "[source | file | chunk N]: <text snippet>"
+      # 4. Return concatenated formatted results as a single string
+  ```
+- **4.4.2** In `services/sre-agent/src/agent/orchestrator.py`, import and register the new module alongside existing tool registrations (currently L92-100):
+  ```python
+  from src.knowledge_tools import register_knowledge_tools
+  register_knowledge_tools(local_mcp)
+  ```
+- **4.4.3** Add `PINECONE_API_KEY` and `PINECONE_INDEX_NAME=aegis-knowledge` to the root `.env` file.
+- **4.4.4** Propagate both variables to the `sre-agent` service `environment` block in `docker-compose.yml`.
+
+##### Step 4.5 — RAG-Driven Error Diagnosis Loop
+
+**Goal**: When the agent detects a code error or compliance anomaly, force a Pinecone query before any fix is proposed.
+
+- **4.5.1** In `orchestrator.py`, extend `system_prompt` with the following mandatory rule (append after existing tool usage instructions):
+  ```
+  MANDATORY RULE: Whenever you receive a tool result containing an error, exception traceback,
+  or an unexplained compliance failure, you MUST call search_knowledge_base(query=<error summary>)
+  BEFORE proposing any remediation or code fix. Ground all fix proposals in retrieved AAOIFI
+  standards or codebase context returned by that search.
+  ```
+- **4.5.2** In the tool execution block of `orchestrator.py` (around L281-284), after `tool_result` is captured: check if `tool_result` starts with `"Error"` or contains `"Traceback"`. If so, append `"\n[RAG HINT]: You must call search_knowledge_base with the above error before proceeding."` to the result string sent back to the LLM. This nudges the model into the RAG loop without hard-coding deterministic branching.
+- **4.5.3** Write an integration test `services/sre-agent/tests/test_rag_loop.py`:
+  - Mock a tool execution that returns `"Execution Error: division by zero in screener.py"`.
+  - Assert the next constructed LLM message history contains a `search_knowledge_base` tool call.
+  - Assert the Pinecone client mock was invoked with a query string containing the error text.
+
+---
+
+### Phase 4 Execution Status & Verification Details (Added June 2026)
+
+#### 🗂️ Dependency Map
+```
+4.1 (Screener SQLite → Postgres)   ──┐
+                                      ├──▶ 4.2 (VaR + Concentration + Risk API)
+4.3.1 (Pinecone index setup)        ──┤
+4.3.2 + 4.3.3 + 4.3.4 (Ingest)    ──┤──▶ 4.4 (search_knowledge_base tool) ──▶ 4.5 (RAG loop)
+4.3.5 + 4.3.6 (DB migration)       ──┘
+```
+Parallel-safe: Steps 4.1 and 4.3.x can proceed simultaneously. Step 4.4 requires 4.3.1 (index must exist). Step 4.5 requires 4.4.
+
+#### 📦 New Dependencies
+
+`services/sre-agent/requirements.txt`:
+```
+pinecone-client>=3.0.0
+pdfplumber>=0.9.0
+tiktoken>=0.5.0
+openai>=1.0.0   # verify not already pinned; needed for embeddings
+```
+
+`services/shariahcompliantscreener/requirements.txt`:
+```
+# No new packages — all changes are refactors of existing SQLAlchemy + scipy code
+```
+
+#### 🔑 New Environment Variables
+
+| Variable | Service | Purpose |
+|---|---|---|
+| `PINECONE_API_KEY` | `sre-agent` | Pinecone serverless auth |
+| `PINECONE_INDEX_NAME` | `sre-agent` | Index name (`aegis-knowledge`) |
+| `OPENAI_API_KEY` | `sre-agent` | Embeddings (verify already in `.env` from LLM fallback) |
+
+#### 📋 Task Checklist Status
+- [ ] Refactor `run_screener()` in `screener.py` to accept `AsyncSession`; zero SQLite references remain.
+- [ ] Replace `df.to_sql()` with async Postgres bulk upserts into `HalalUniverse`, `DoubtfulUniverse`, `HalalRejection`.
+- [ ] Update `api.py` `run_screener_scan()` to pass `AsyncSession` to `run_screener(session)`.
+- [ ] Add `STANDARDS_REFERENCE` docstring block to `screener.py` for all threshold constants with AAOIFI/MSCI citations.
+- [ ] Validate `MAX_RECEIVABLES_RATIO` gating decision; document the outcome inline.
+- [ ] Add formal `get_market_cap()` docstring documenting three-tier fallback.
+- [ ] Migrate `processed_comments.json` to `db_sre`; delete flat file; update `server.py`.
+- [x] Implement `calculate_var()` in `optimizer.py`; wire as scipy constraint in `run_optimizer()`.
+- [x] Add post-optimization concentration cap clip + `AgentLog` warning in `optimizer.py`.
+- [x] Add `VaR_95` to `run_optimizer()` return dict.
+- [x] Expose `GET /api/portfolio/risk-profile` endpoint in `api.py`.
+- [x] Add `get_portfolio_risk_profile` MCP tool in `api.py`.
+- [x] Create `scripts/setup_pgvector.py`; verify idempotent extension + table creation. *(Pivoted from Pinecone to pgvector)*
+- [x] Create `scripts/ingest_aaoifi.py`; test against AAOIFI Standard No. 21 PDF; verify ≥ 1 chunk upserted. *(Uses pgvector)*
+- [x] Create `scripts/ingest_codebase.py`; verify metadata (file, symbol) correct in pgvector. *(Uses pgvector)*
+- [x] Add `KnowledgeIngestionRun` model to `src/db/models.py`; DDL added to `init.sql`.
+- [ ] Create `src/knowledge_tools.py`; implement and test `search_knowledge_base`.
+- [ ] Register `knowledge_tools` in `orchestrator.py` alongside existing local tool modules.
+- [x] Docker image switched to `pgvector/pgvector:pg15`; no Pinecone env vars needed.
+- [ ] Update `system_prompt` in `orchestrator.py` with mandatory RAG rule.
+- [ ] Add RAG HINT injection to error path in tool execution block (`orchestrator.py` ~L281-284).
+- [ ] Write and pass `tests/test_rag_loop.py` integration test.
+
+---
+
+### Handoff Notes (Session: 2026-06-23 — Phase 4.3)
+
+#### What was completed this session
+
+1. **Architectural Pivot: Pinecone → pgvector**
+   - User requested pgvector instead of Pinecone. This eliminates an external service dependency — vectors now live in the existing PostgreSQL instance alongside all other data.
+   - Docker image switched from `postgres:15-alpine` to `pgvector/pgvector:pg15` (has the `vector` extension pre-installed).
+   - No `PINECONE_API_KEY` or `PINECONE_INDEX_NAME` env vars needed.
+
+2. **Phase 4.3 — Ingestion Pipeline (COMPLETE)**
+   - **`requirements.txt`** updated with `pgvector>=0.3.0`, `pdfplumber>=0.9.0`, `tiktoken>=0.5.0`, `psycopg2-binary>=2.9.0`.
+   - **`KnowledgeIngestionRun`** model added to `services/sre-agent/src/db/models.py` for ingestion audit trail.
+   - **`init.sql`** updated to: enable `vector` extension in `db_sre`, create `knowledge_ingestion_runs` table, create `knowledge_vectors` table with `vector(1536)` column and HNSW cosine index.
+   - **`scripts/setup_pgvector.py`** — idempotent setup script that ensures extension + tables + index exist.
+   - **`scripts/ingest_aaoifi.py`** — PDF ingestion pipeline: pdfplumber → tiktoken chunking (500 tokens, 50 overlap) → OpenAI text-embedding-3-small → pgvector upsert.
+   - **`scripts/ingest_codebase.py`** — Codebase ingestion pipeline: walks `*.py` files, extracts top-level symbols via `ast.parse`, embeds, upserts with `{source, file, symbol}` metadata.
+
+#### Current state of each Phase 4 sub-step
+
+| Step | Status | Notes |
+|------|--------|-------|
+| 4.1 (SQLite→Postgres) | ⬜ Incomplete | `screener.py` still uses `get_db()` wrapper. Dual-database pattern persists. 7 unchecked items. |
+| 4.2 (Risk Guardrails) | ✅ Complete | All 6 sub-steps done. |
+| 4.3 (pgvector Ingestion) | ✅ Complete | Pivoted from Pinecone to pgvector. All 6 sub-steps done. |
+| 4.4 (Vector Search Tool) | ⬜ Not started | Depends on 4.3 (tables must exist). Next step. |
+| 4.5 (RAG Loop) | ⬜ Not started | Depends on 4.4. |
+
+#### Key files modified
+
+| File | Change |
+|------|--------|
+| `services/sre-agent/requirements.txt` | Added `pgvector`, `pdfplumber`, `tiktoken`, `psycopg2-binary` |
+| `services/sre-agent/src/db/models.py` | Added `KnowledgeIngestionRun` model |
+| `services/sre-agent/scripts/setup_pgvector.py` | New — idempotent pgvector setup |
+| `services/sre-agent/scripts/ingest_aaoifi.py` | New — AAOIFI PDF ingestion pipeline |
+| `services/sre-agent/scripts/ingest_codebase.py` | New — Python codebase ingestion pipeline |
+| `init.sql` | Added pgvector extension, `knowledge_vectors` + `knowledge_ingestion_runs` tables, HNSW index |
+| `docker-compose.yml` | Switched DB image to `pgvector/pgvector:pg15` |
+
+#### Important context for the next agent
+
+- **pgvector schema**: The `knowledge_vectors` table uses `vector(1536)` for OpenAI `text-embedding-3-small` embeddings. Cosine similarity search uses the `<=>` operator. An HNSW index (`vector_cosine_ops`) is created for performance.
+- **Container rebuild required**: The DB image changed and `init.sql` updated. Need `docker compose down -v` (to reset DB volume) then `docker compose up -d --build` for a clean start. Alternatively, run `scripts/setup_pgvector.py` inside the sre-agent container to create tables on an existing DB.
+- **No Alembic**: The project doesn't use Alembic. Schema changes are managed via `init.sql` (for fresh containers) and manual migration scripts.
+- **Next recommended step**: 4.4 (create `src/knowledge_tools.py` with `search_knowledge_base` tool, register in orchestrator). This is a clean single-step task.
+
+---
+*Prepared by Antigravity agent for seamless handoff.*

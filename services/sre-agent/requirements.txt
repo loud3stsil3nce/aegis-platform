@@ -13,3 +13,7 @@ openai
 pydantic
 cryptography
 jira
+pgvector>=0.3.0
+pdfplumber>=0.9.0
+tiktoken>=0.5.0
+psycopg2-binary>=2.9.0
