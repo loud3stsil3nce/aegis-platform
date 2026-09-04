@@ -175,3 +175,14 @@ class DeploymentProposalStore:
         proposal = self.get(proposal_id)
         with self._lock, self.connection:
             self._event(proposal_id, proposal["plugin_id"], status, actor, detail)
+
+    def record_denial(self, proposal_id: str, *, status: str, actor: str) -> None:
+        _require_actor(actor)
+        if status not in {"APPROVAL_DENIED", "EXECUTION_DENIED"}:
+            raise DeploymentApprovalError("invalid deployment denial status")
+        proposal = self.get(proposal_id)
+        with self._lock, self.connection:
+            self._event(
+                proposal_id, proposal["plugin_id"], status, actor,
+                "deployment operation rejected by policy",
+            )

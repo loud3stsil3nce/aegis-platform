@@ -1,0 +1,17 @@
+[
+  {
+    "id": "deployment-requester",
+    "roles": ["requester"],
+    "tokenFile": "/run/secrets/requester-token"
+  },
+  {
+    "id": "deployment-approver",
+    "roles": ["approver"],
+    "tokenFile": "/run/secrets/approver-token"
+  },
+  {
+    "id": "deployment-executor",
+    "roles": ["executor"],
+    "tokenFile": "/run/secrets/executor-token"
+  }
+]
