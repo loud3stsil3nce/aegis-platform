@@ -39,6 +39,14 @@ have a separately approved record of the legacy image, target digest, health
 gate, and rollback procedure. Subsequent deployments use the ordinary immutable
 proposal path.
 
+The bootstrap exception is exact and per-target. The proposal policy accepts
+only the configured legacy tag as the current image. The Docker deployment
+proxy accepts that tag only with the proposal-derived `rollback` idempotency
+operation and first verifies that the local tag still resolves to the configured
+image ID. A bootstrap deploy request cannot select a mutable tag, and a changed
+or missing local rollback image fails closed for manual recovery. Remove the
+bootstrap fields after the first migration and its rollback-observation window.
+
 The checked-in GitHub workflow uses BuildKit provenance and SBOM. GitHub's
 hosted artifact-attestation documentation states that attestations for private
 repositories require GitHub Enterprise Cloud. Add the GitHub attestation step

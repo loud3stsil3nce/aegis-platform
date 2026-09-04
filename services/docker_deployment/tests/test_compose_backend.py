@@ -7,11 +7,13 @@ from services.docker_deployment.policy import ProxyTarget
 
 
 IMAGE = "ghcr.io/loud3stsil3nce/aegis-hello-aegis@sha256:" + "a" * 64
+LEGACY = "aegis/hello-aegis:0.1.0"
+LEGACY_ID = "sha256:" + "e" * 64
 TARGET = ProxyTarget(
     "hello-aegis", "hello-aegis-hello-aegis-1",
     "ghcr.io/loud3stsil3nce/aegis-hello-aegis", "hello-aegis",
     "/srv/hello-aegis", "/srv/hello-aegis/compose.yaml",
-    "AEGIS_HELLO_AEGIS_IMAGE",
+    "AEGIS_HELLO_AEGIS_IMAGE", LEGACY, LEGACY_ID,
 )
 
 
@@ -35,7 +37,7 @@ class ComposeBackendTests(unittest.TestCase):
 
     def test_apply_pulls_exact_digest_and_recreates_only_bound_service(self):
         runner = Runner()
-        ComposeBackend(runner=runner).apply(TARGET, IMAGE)
+        ComposeBackend(runner=runner).apply(TARGET, IMAGE, "deploy")
         self.assertEqual(runner.calls[0][0], ["docker", "pull", IMAGE])
         compose, options = runner.calls[1]
         self.assertEqual(
@@ -44,6 +46,19 @@ class ComposeBackendTests(unittest.TestCase):
         self.assertEqual(compose[0], "docker-compose")
         self.assertEqual(options["env"]["AEGIS_HELLO_AEGIS_IMAGE"], IMAGE)
         self.assertNotIn("shell", options)
+
+    def test_bootstrap_rollback_verifies_local_image_id_without_pull(self):
+        runner = Runner([LEGACY_ID])
+        ComposeBackend(runner=runner).apply(TARGET, LEGACY, "rollback")
+        self.assertEqual(
+            runner.calls[0][0],
+            ["docker", "image", "inspect", "--format", "{{.Id}}", LEGACY],
+        )
+        self.assertEqual(runner.calls[1][0][0], "docker-compose")
+        with self.assertRaisesRegex(ComposeBackendError, "identity changed"):
+            ComposeBackend(runner=Runner(["sha256:" + "f" * 64])).apply(
+                TARGET, LEGACY, "rollback",
+            )
 
     def test_bad_or_oversized_state_fails_closed(self):
         for output in ("bad", "x" * 20_000):

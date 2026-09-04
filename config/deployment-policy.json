@@ -3,7 +3,8 @@
     {
       "pluginId": "hello-aegis",
       "service": "hello-aegis",
-      "imageRepository": "ghcr.io/loud3stsil3nce/aegis-hello-aegis"
+      "imageRepository": "ghcr.io/loud3stsil3nce/aegis-hello-aegis",
+      "bootstrapCurrentImage": "aegis/hello-aegis:0.1.0"
     }
   ]
 }

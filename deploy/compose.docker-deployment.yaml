@@ -1,0 +1,40 @@
+name: aegis-image-deployment
+
+services:
+  docker-deployment:
+    image: aegis/docker-deployment:0.1.0
+    build:
+      context: ..
+      dockerfile: services/docker_deployment/Dockerfile
+      args:
+        AEGIS_DEPLOYMENT_UID: ${AEGIS_DEPLOYMENT_UID:?Set deployment owner UID}
+        AEGIS_DOCKER_GID: ${AEGIS_DOCKER_SOCKET_GID:?Set Docker socket GID}
+    restart: unless-stopped
+    environment:
+      AEGIS_DEPLOYMENT_PROXY_POLICY: /run/config/docker-deployment-policy.json
+      AEGIS_DEPLOYMENT_PROXY_STATE: /var/lib/aegis-deployment/idempotency.sqlite3
+      AEGIS_DEPLOYMENT_PROXY_TOKEN_FILE: /run/secrets/deployment-proxy-token
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - deployment-proxy-state:/var/lib/aegis-deployment
+      - ../config/docker-deployment-policy.json:/run/config/docker-deployment-policy.json:ro
+      - ${AEGIS_DOCKER_DEPLOYMENT_TOKEN_FILE:?Set deployment proxy token file}:/run/secrets/deployment-proxy-token:ro
+      - /home/rafiurrahman/projects/aegis-plugins/hello-aegis:/home/rafiurrahman/projects/aegis-plugins/hello-aegis:ro
+    read_only: true
+    tmpfs: ["/tmp:size=16m,mode=1777"]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    networks: [deployment]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8013/health', timeout=3)"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 10s
+
+volumes:
+  deployment-proxy-state:
+
+networks:
+  deployment:
+    internal: true

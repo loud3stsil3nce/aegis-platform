@@ -142,7 +142,7 @@ def replace_image(service: str, body: ImageRequest) -> dict[str, str]:
             if claim == "APPLIED":
                 return {"target": service, "status": "already_applied", "idempotency_key": body.idempotency_key}
             claimed = True
-            _backend.apply(request.target, request.image_reference)
+            _backend.apply(request.target, request.image_reference, request.operation)
             if _backend.state(request.target).get("image") != request.image_reference:
                 raise ComposeBackendError("replacement image verification failed")
             _store().finish(body.idempotency_key, "APPLIED")

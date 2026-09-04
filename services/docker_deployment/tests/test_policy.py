@@ -13,6 +13,8 @@ from services.docker_deployment.policy import (
 
 REPOSITORY = "ghcr.io/loud3stsil3nce/aegis-hello-aegis"
 IMAGE = REPOSITORY + "@sha256:" + "a" * 64
+LEGACY = "aegis/hello-aegis:0.1.0"
+LEGACY_ID = "sha256:" + "e" * 64
 
 
 class DeploymentProxyPolicyTests(unittest.TestCase):
@@ -24,6 +26,8 @@ class DeploymentProxyPolicyTests(unittest.TestCase):
             "composeProject": "hello-aegis", "projectDirectory": "/srv/hello-aegis",
             "composeFile": "/srv/hello-aegis/compose.yaml",
             "imageVariable": "AEGIS_HELLO_AEGIS_IMAGE",
+            "bootstrapRollbackImage": LEGACY,
+            "bootstrapRollbackImageId": LEGACY_ID,
         }]})
         self.store = DeploymentIdempotencyStore(Path(self.temp.name) / "idempotency.sqlite3")
         self.key = f"{uuid.uuid4()}:deploy"
@@ -37,6 +41,15 @@ class DeploymentProxyPolicyTests(unittest.TestCase):
         request = self.request()
         self.assertEqual(request.target.container, "hello-aegis-hello-aegis-1")
         self.assertEqual(request.operation, "deploy")
+
+    def test_exact_legacy_image_is_rollback_only(self):
+        rollback = self.request(
+            image_reference=LEGACY, idempotency_key=f"{uuid.uuid4()}:rollback",
+        )
+        self.assertEqual(rollback.operation, "rollback")
+        for operation, image in (("deploy", LEGACY), ("rollback", "aegis/hello-aegis:latest")):
+            with self.subTest(operation=operation), self.assertRaises(DeploymentProxyPolicyError):
+                self.request(image_reference=image, idempotency_key=f"{uuid.uuid4()}:{operation}")
 
     def test_unknown_mutable_cross_repository_and_bad_keys_fail(self):
         cases = (
@@ -57,12 +70,16 @@ class DeploymentProxyPolicyTests(unittest.TestCase):
             "projectDirectory": "/srv/hello-aegis",
             "composeFile": "/srv/hello-aegis/compose.yaml",
             "imageVariable": "AEGIS_HELLO_AEGIS_IMAGE",
+            "bootstrapRollbackImage": LEGACY,
+            "bootstrapRollbackImageId": LEGACY_ID,
         }
         for changed in (
             {"service": "../other"}, {"imageRepository": "UPPER/repo"},
             {"imageVariable": "BAD-NAME"}, {"projectDirectory": "relative"},
             {"composeFile": "/srv/other/compose.yaml"},
             {"composeFile": "/srv/hello-aegis/../compose.yaml"},
+            {"bootstrapRollbackImage": "not-a-tag"},
+            {"bootstrapRollbackImageId": "sha256:short"},
         ):
             value = {**base, **changed}
             with self.subTest(changed=changed), self.assertRaises(DeploymentProxyPolicyError):
