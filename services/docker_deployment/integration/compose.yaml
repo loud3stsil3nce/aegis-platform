@@ -1,0 +1,9 @@
+services:
+  disposable:
+    image: ${AEGIS_DISPOSABLE_IMAGE:?Set an immutable disposable image}
+    command: ["sleep", "300"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "raise SystemExit(0)"]
+      interval: 1s
+      timeout: 1s
+      retries: 3

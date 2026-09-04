@@ -1,0 +1,9 @@
+{
+  "targets": [
+    {
+      "pluginId": "hello-aegis",
+      "service": "hello-aegis",
+      "imageRepository": "ghcr.io/loud3stsil3nce/aegis-hello-aegis"
+    }
+  ]
+}

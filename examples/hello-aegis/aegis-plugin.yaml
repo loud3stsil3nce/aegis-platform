@@ -1,0 +1,29 @@
+{
+  "apiVersion": "aegis.dev/v1alpha1",
+  "kind": "Plugin",
+  "metadata": {
+    "id": "hello-aegis",
+    "name": "Hello Aegis",
+    "version": "0.1.0",
+    "description": "Minimal zero-secret read-only plugin used for conformance tests.",
+    "owner": "Aegis maintainers"
+  },
+  "spec": {
+    "coreCompatibility": "^0.1.0",
+    "runtime": {"mode": "managed-container", "composeFile": "compose.yaml", "service": "hello-aegis", "endpoint": "http://hello-aegis:8090"},
+    "mcp": {"transport": "streamable-http", "path": "/mcp"},
+    "permissions": {
+      "capabilities": [{"name": "hello.read", "risk": "R0", "description": "Return a static greeting."}],
+      "secrets": [],
+      "networks": ["hello-aegis"],
+      "storage": []
+    },
+    "health": {"liveness": "/health/live", "readiness": "/health/ready", "version": "/version", "metrics": "/metrics", "logs": "/logs"},
+    "lifecycle": {
+      "manager": "aegis-cli",
+      "supports": ["disable", "upgrade", "rollback", "remove", "restart"],
+      "restart": {"action": "plugin.restart", "target": "hello-aegis-hello-aegis-1", "healthTimeoutSeconds": 60}
+    },
+    "resources": {"memory": "128Mi", "cpus": 0.25}
+  }
+}

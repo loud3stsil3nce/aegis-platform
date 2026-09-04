@@ -1,0 +1,13 @@
+{
+  "targets": [
+    {
+      "service": "disposable",
+      "container": "aegis-deployment-disposable-disposable-1",
+      "imageRepository": "python",
+      "composeProject": "aegis-deployment-disposable",
+      "projectDirectory": "/fixtures",
+      "composeFile": "/fixtures/compose.yaml",
+      "imageVariable": "AEGIS_DISPOSABLE_IMAGE"
+    }
+  ]
+}

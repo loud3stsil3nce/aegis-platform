@@ -1,0 +1,26 @@
+services:
+  hello-aegis:
+    build: .
+    image: ${AEGIS_HELLO_AEGIS_IMAGE:-aegis/hello-aegis:0.1.0}
+    restart: unless-stopped
+    environment:
+      AEGIS_PLUGIN_SERVICE_TOKEN: ${AEGIS_PLUGIN_SERVICE_TOKEN:?Set an isolated plugin service token}
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=16m,noexec,nosuid,nodev
+    networks:
+      - plugin
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8090/health/ready', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+networks:
+  plugin:
+    internal: true

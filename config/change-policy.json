@@ -1,0 +1,19 @@
+{
+  "repositories": ["loud3stsil3nce/aegis-platform"],
+  "baseBranches": ["main"],
+  "allowedPathPrefixes": [
+    "core",
+    "sdk",
+    "cli",
+    "config",
+    "deploy",
+    "docs",
+    "examples",
+    "scripts",
+    "services/docker_deployment"
+  ],
+  "proposedBranchPrefix": "aegis/",
+  "maxFiles": 20,
+  "maxDiffBytes": 131072,
+  "maxChangedLines": 1000
+}

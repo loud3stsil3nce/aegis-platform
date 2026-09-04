@@ -1,0 +1,13 @@
+{
+  "targets": [
+    {
+      "service": "hello-aegis",
+      "container": "hello-aegis-hello-aegis-1",
+      "imageRepository": "ghcr.io/loud3stsil3nce/aegis-hello-aegis",
+      "composeProject": "hello-aegis",
+      "projectDirectory": "/home/rafiurrahman/projects/aegis-plugins/hello-aegis",
+      "composeFile": "/home/rafiurrahman/projects/aegis-plugins/hello-aegis/compose.yaml",
+      "imageVariable": "AEGIS_HELLO_AEGIS_IMAGE"
+    }
+  ]
+}
