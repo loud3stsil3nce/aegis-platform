@@ -1,0 +1,65 @@
+name: Build hello-aegis immutable image
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - examples/hello-aegis/**
+      - .github/workflows/build-hello-aegis.yml
+  workflow_dispatch:
+
+concurrency:
+  group: build-hello-aegis-${{ github.sha }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE_REPOSITORY: ghcr.io/loud3stsil3nce/aegis-hello-aegis
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - name: Check out exact revision
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+
+      - name: Log in to GHCR
+        uses: docker/login-action@65b78e6e13532edd9afa3aa52ac7964289d1a9c1 # v3.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and publish exact revision
+        id: build
+        uses: docker/build-push-action@3b5e8027fcad23fda98b2e3ac259d8d67585f671 # v6.18.0
+        with:
+          context: examples/hello-aegis
+          file: examples/hello-aegis/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.IMAGE_REPOSITORY }}:git-${{ github.sha }}
+          provenance: mode=max
+          sbom: true
+
+      - name: Record immutable output
+        env:
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          test -n "$IMAGE_DIGEST"
+          case "$IMAGE_DIGEST" in
+            sha256:????????????????????????????????????????????????????????????????) ;;
+            *) exit 1 ;;
+          esac
+          echo "Image: $IMAGE_REPOSITORY@$IMAGE_DIGEST" >> "$GITHUB_STEP_SUMMARY"
