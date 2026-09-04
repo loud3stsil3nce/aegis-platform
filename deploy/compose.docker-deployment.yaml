@@ -32,8 +32,47 @@ services:
       retries: 6
       start_period: 10s
 
+  image-deployment-api:
+    image: aegis/image-deployment-api:0.1.0
+    build:
+      context: ..
+      dockerfile: core/change_management/Dockerfile.deployment-api
+      args:
+        AEGIS_DEPLOYMENT_UID: ${AEGIS_IMAGE_DEPLOYMENT_UID:?Set image deployment API UID}
+        AEGIS_DEPLOYMENT_GID: ${AEGIS_IMAGE_DEPLOYMENT_GID:?Set image deployment API GID}
+    restart: unless-stopped
+    depends_on:
+      docker-deployment:
+        condition: service_healthy
+    environment:
+      AEGIS_IMAGE_DEPLOYMENT_POLICY: /run/config/deployment-policy.json
+      AEGIS_IMAGE_DEPLOYMENT_ACTORS_FILE: /run/config/actors.json
+      AEGIS_IMAGE_DEPLOYMENT_STATE_PATH: /var/lib/aegis-image-deployment/proposals.sqlite3
+      AEGIS_IMAGE_DEPLOYMENT_PROXY_URL: http://docker-deployment:8013
+      AEGIS_IMAGE_DEPLOYMENT_PROXY_TOKEN_FILE: /run/secrets/deployment-proxy-token
+    volumes:
+      - image-deployment-state:/var/lib/aegis-image-deployment
+      - ../config/deployment-policy.json:/run/config/deployment-policy.json:ro
+      - ${AEGIS_IMAGE_DEPLOYMENT_ACTORS_FILE:?Set image deployment actor config}:/run/config/actors.json:ro
+      - ${AEGIS_DOCKER_DEPLOYMENT_TOKEN_FILE:?Set deployment proxy token file}:/run/secrets/deployment-proxy-token:ro
+      - ${AEGIS_IMAGE_DEPLOYMENT_REQUESTER_TOKEN_FILE:?Set requester token file}:/run/secrets/requester-token:ro
+      - ${AEGIS_IMAGE_DEPLOYMENT_APPROVER_TOKEN_FILE:?Set approver token file}:/run/secrets/approver-token:ro
+      - ${AEGIS_IMAGE_DEPLOYMENT_EXECUTOR_TOKEN_FILE:?Set executor token file}:/run/secrets/executor-token:ro
+    read_only: true
+    tmpfs: ["/tmp:size=16m,mode=1777"]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    networks: [deployment]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8014/health', timeout=3)"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 10s
+
 volumes:
   deployment-proxy-state:
+  image-deployment-state:
 
 networks:
   deployment:

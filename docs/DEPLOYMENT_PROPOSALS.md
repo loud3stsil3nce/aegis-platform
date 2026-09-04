@@ -25,6 +25,25 @@ registry credential, the Docker socket, or an unrestricted Compose command.
    Failure restores and verifies the bound previous digest; uncertain rollback
    stops for manual recovery.
 
+## Internal proposal API
+
+The image-deployment API is a separate internal-only service on the same private
+network as the Docker deployment proxy. It has no host port and is not registered
+with Open WebUI or a model-facing MCP server. Three file-backed bearer identities
+hold non-overlapping requester, approver, and executor roles.
+
+Proposal callers provide only a plugin ID, exact Git SHA, target image digest,
+bounded health timeout, and approval TTL. The service resolves the allowlisted
+service and reads the current image directly from the proxy; callers cannot
+supply a container, Compose path, expected current image, rollback image, or
+Docker operation. Approval re-reads current state, and execution reconstructs
+the exact durable plan before the executor consumes it atomically.
+
+The API exposes only health, create/get proposal, approve, and execute routes.
+Bodies are strictly modeled and capped for both fixed and streamed requests.
+Authentication and actor authorization failures are distinct, while policy and
+state conflicts fail closed without falling through to the proxy.
+
 ## Bootstrap gates
 
 The workflow is intentionally outside the source-change App's allowlisted paths
