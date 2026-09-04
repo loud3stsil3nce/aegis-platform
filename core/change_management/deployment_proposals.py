@@ -20,6 +20,11 @@ class DeploymentApprovalError(ValueError):
     pass
 
 
+def _require_actor(actor: str) -> None:
+    if not isinstance(actor, str) or not actor.strip() or len(actor.encode()) > 200:
+        raise DeploymentApprovalError("a bounded attributable actor is required")
+
+
 def _now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -66,8 +71,7 @@ class DeploymentProposalStore:
         self, *, plan: ImmutableDeploymentPlan, requested_by: str,
         ttl_seconds: int = 900,
     ) -> dict[str, Any]:
-        if not requested_by:
-            raise DeploymentApprovalError("requesting actor is required")
+        _require_actor(requested_by)
         if not 30 <= ttl_seconds <= 3600:
             raise DeploymentApprovalError("approval TTL must be between 30 and 3600 seconds")
         proposal_id, now = str(uuid.uuid4()), _now()
@@ -96,6 +100,7 @@ class DeploymentProposalStore:
     def approve(
         self, proposal_id: str, *, approved_by: str, current_image: str,
     ) -> dict[str, Any]:
+        _require_actor(approved_by)
         now, error = _now(), None
         with self._lock, self.connection:
             row = self.connection.execute(
@@ -135,6 +140,7 @@ class DeploymentProposalStore:
         self, proposal_id: str, *, plan: ImmutableDeploymentPlan,
         current_image: str, actor: str,
     ) -> dict[str, Any]:
+        _require_actor(actor)
         now, values, denied = _now(), asdict(plan), False
         with self._lock, self.connection:
             result = self.connection.execute(
@@ -163,6 +169,7 @@ class DeploymentProposalStore:
         return self.get(proposal_id)
 
     def record_execution(self, proposal_id: str, *, status: str, actor: str, detail: str) -> None:
+        _require_actor(actor)
         if status not in {"HEALTHY", "ROLLED_BACK", "FAILED"}:
             raise DeploymentApprovalError("invalid deployment execution status")
         proposal = self.get(proposal_id)

@@ -50,6 +50,24 @@ class DeploymentProxyPolicyTests(unittest.TestCase):
             with self.subTest(values=values), self.assertRaises(DeploymentProxyPolicyError):
                 self.request(**values)
 
+    def test_external_policy_rejects_identifiers_variables_and_paths(self):
+        base = {
+            "service": "hello-aegis", "container": "hello-aegis-hello-aegis-1",
+            "imageRepository": REPOSITORY, "composeProject": "hello-aegis",
+            "projectDirectory": "/srv/hello-aegis",
+            "composeFile": "/srv/hello-aegis/compose.yaml",
+            "imageVariable": "AEGIS_HELLO_AEGIS_IMAGE",
+        }
+        for changed in (
+            {"service": "../other"}, {"imageRepository": "UPPER/repo"},
+            {"imageVariable": "BAD-NAME"}, {"projectDirectory": "relative"},
+            {"composeFile": "/srv/other/compose.yaml"},
+            {"composeFile": "/srv/hello-aegis/../compose.yaml"},
+        ):
+            value = {**base, **changed}
+            with self.subTest(changed=changed), self.assertRaises(DeploymentProxyPolicyError):
+                DeploymentProxyPolicy.from_dict({"targets": [value]})
+
     def test_applied_replay_is_safe_and_changed_binding_fails(self):
         request = self.request()
         self.assertEqual(self.store.claim(request), "CLAIMED")

@@ -23,6 +23,11 @@ class ChangeApprovalError(ValueError):
     pass
 
 
+def _require_actor(actor: str) -> None:
+    if not isinstance(actor, str) or not actor.strip() or len(actor.encode()) > 200:
+        raise ChangeApprovalError("a bounded attributable actor is required")
+
+
 def _now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -73,8 +78,7 @@ class ChangeProposalStore:
         base_sha: str, proposed_branch: str, unified_diff: str,
         file_contents: dict[str, bytes], requested_by: str, ttl_seconds: int = 900,
     ) -> dict[str, Any]:
-        if not requested_by:
-            raise ChangeApprovalError("requesting actor is required")
+        _require_actor(requested_by)
         if not _COMMIT_SHA.fullmatch(base_sha):
             raise ChangeApprovalError("base commit SHA must be an exact lowercase hash")
         if not 30 <= ttl_seconds <= 3600:
@@ -111,6 +115,7 @@ class ChangeProposalStore:
         return result
 
     def record_execution(self, proposal_id: str, *, status: str, actor: str, detail: str) -> None:
+        _require_actor(actor)
         if status not in {"SUCCESS", "FAILED"}:
             raise ChangeApprovalError("invalid change execution status")
         proposal = self.get(proposal_id)
@@ -118,6 +123,7 @@ class ChangeProposalStore:
             self._event(proposal_id, proposal["repository"], status, actor, detail)
 
     def approve(self, proposal_id: str, *, approved_by: str, current_base_sha: str) -> dict[str, Any]:
+        _require_actor(approved_by)
         now, error = _now(), None
         with self._lock, self.connection:
             row = self.connection.execute(
@@ -157,6 +163,7 @@ class ChangeProposalStore:
         self, proposal_id: str, *, diff_sha256: str,
         content_manifest_sha256: str, current_base_sha: str, actor: str,
     ) -> dict[str, Any]:
+        _require_actor(actor)
         now, denied = _now(), False
         with self._lock, self.connection:
             result = self.connection.execute(

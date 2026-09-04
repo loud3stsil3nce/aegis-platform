@@ -7,11 +7,14 @@ import sqlite3
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 
 _DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
+_IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
+_IMAGE_REPOSITORY = re.compile(r"^[a-z0-9][a-z0-9._/-]*[a-z0-9]$")
+_ENVIRONMENT_NAME = re.compile(r"^[A-Z][A-Z0-9_]{0,127}$")
 
 
 class DeploymentProxyPolicyError(ValueError):
@@ -62,6 +65,23 @@ class DeploymentProxyPolicy:
                 item["composeProject"], item["projectDirectory"], item["composeFile"],
                 item["imageVariable"],
             )
+            project_directory = PurePosixPath(target.project_directory)
+            compose_file = PurePosixPath(target.compose_file)
+            if not all(_IDENTIFIER.fullmatch(value) for value in (
+                target.service, target.container, target.compose_project,
+            )):
+                raise DeploymentProxyPolicyError("proxy target identifiers are invalid")
+            if not _IMAGE_REPOSITORY.fullmatch(target.image_repository):
+                raise DeploymentProxyPolicyError("proxy image repository is invalid")
+            if not _ENVIRONMENT_NAME.fullmatch(target.image_variable):
+                raise DeploymentProxyPolicyError("proxy image variable is invalid")
+            if (
+                not project_directory.is_absolute() or not compose_file.is_absolute()
+                or ".." in project_directory.parts or ".." in compose_file.parts
+                or compose_file.parent != project_directory
+                or compose_file.suffix not in {".yaml", ".yml"}
+            ):
+                raise DeploymentProxyPolicyError("proxy Compose paths are invalid")
             if target.service in targets:
                 raise DeploymentProxyPolicyError("proxy target service is duplicated")
             targets[target.service] = target

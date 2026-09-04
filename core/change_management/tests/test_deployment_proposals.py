@@ -55,6 +55,15 @@ class DeploymentProposalTests(unittest.TestCase):
             self.store.approve(stale["proposal_id"], approved_by="approver", current_image=CURRENT.replace("a", "d"))
         self.assertEqual(self.store.get(stale["proposal_id"])["status"], "STALE")
 
+    def test_all_actor_boundaries_require_attribution(self):
+        with self.assertRaisesRegex(DeploymentApprovalError, "attributable actor"):
+            self.propose("   ")
+        proposal = self.propose()
+        with self.assertRaisesRegex(DeploymentApprovalError, "attributable actor"):
+            self.store.approve(proposal["proposal_id"], approved_by="", current_image=CURRENT)
+        with self.assertRaisesRegex(DeploymentApprovalError, "attributable actor"):
+            self.store.record_execution(proposal["proposal_id"], status="FAILED", actor="", detail="x")
+
     def test_expiry_is_durable(self):
         proposal = self.propose()
         expired = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()

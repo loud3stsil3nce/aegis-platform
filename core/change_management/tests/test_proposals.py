@@ -55,6 +55,15 @@ class ChangeProposalTests(unittest.TestCase):
         with self.assertRaisesRegex(ChangeApprovalError, "own change"):
             self.store.approve(proposal["proposal_id"], approved_by="same", current_base_sha=BASE)
 
+    def test_all_actor_boundaries_require_attribution(self):
+        with self.assertRaisesRegex(ChangeApprovalError, "attributable actor"):
+            self.propose("   ")
+        proposal = self.propose()
+        with self.assertRaisesRegex(ChangeApprovalError, "attributable actor"):
+            self.store.approve(proposal["proposal_id"], approved_by="", current_base_sha=BASE)
+        with self.assertRaisesRegex(ChangeApprovalError, "attributable actor"):
+            self.store.record_execution(proposal["proposal_id"], status="FAILED", actor="", detail="x")
+
     def test_changed_base_is_durably_stale(self):
         proposal = self.propose()
         with self.assertRaisesRegex(ChangeApprovalError, "base commit changed"):
