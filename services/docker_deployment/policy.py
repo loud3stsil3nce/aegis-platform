@@ -14,6 +14,7 @@ from typing import Any
 _DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 _IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 _IMAGE_REPOSITORY = re.compile(r"^[a-z0-9][a-z0-9._/-]*[a-z0-9]$")
+_TAGGED_IMAGE = re.compile(r"^[a-z0-9][a-z0-9._/-]*[a-z0-9]:[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 _ENVIRONMENT_NAME = re.compile(r"^[A-Z][A-Z0-9_]{0,127}$")
 
 
@@ -30,6 +31,8 @@ class ProxyTarget:
     project_directory: str
     compose_file: str
     image_variable: str
+    bootstrap_rollback_image: str | None = None
+    bootstrap_rollback_image_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -55,15 +58,22 @@ class DeploymentProxyPolicy:
             fields = {
                 "service", "container", "imageRepository", "composeProject",
                 "projectDirectory", "composeFile", "imageVariable",
+                "bootstrapRollbackImage",
+                "bootstrapRollbackImageId",
             }
             if not isinstance(item, dict) or set(item) != fields:
                 raise DeploymentProxyPolicyError("proxy target fields are invalid")
-            if any(not isinstance(item[field], str) or not item[field] for field in item):
+            required_strings = fields - {"bootstrapRollbackImage", "bootstrapRollbackImageId"}
+            if any(not isinstance(item[field], str) or not item[field] for field in required_strings):
                 raise DeploymentProxyPolicyError("proxy target values must be non-empty strings")
+            for optional_field in ("bootstrapRollbackImage", "bootstrapRollbackImageId"):
+                if item[optional_field] is not None and not isinstance(item[optional_field], str):
+                    raise DeploymentProxyPolicyError("proxy bootstrap rollback image is invalid")
             target = ProxyTarget(
                 item["service"], item["container"], item["imageRepository"],
                 item["composeProject"], item["projectDirectory"], item["composeFile"],
-                item["imageVariable"],
+                item["imageVariable"], item["bootstrapRollbackImage"],
+                item["bootstrapRollbackImageId"],
             )
             project_directory = PurePosixPath(target.project_directory)
             compose_file = PurePosixPath(target.compose_file)
@@ -75,6 +85,23 @@ class DeploymentProxyPolicy:
                 raise DeploymentProxyPolicyError("proxy image repository is invalid")
             if not _ENVIRONMENT_NAME.fullmatch(target.image_variable):
                 raise DeploymentProxyPolicyError("proxy image variable is invalid")
+            if (
+                target.bootstrap_rollback_image is not None
+                and (
+                    not isinstance(target.bootstrap_rollback_image, str)
+                    or not target.bootstrap_rollback_image
+                    or not _TAGGED_IMAGE.fullmatch(target.bootstrap_rollback_image)
+                    or len(target.bootstrap_rollback_image.encode()) > 300
+                )
+            ):
+                raise DeploymentProxyPolicyError("proxy bootstrap rollback image is invalid")
+            if (target.bootstrap_rollback_image is None) != (target.bootstrap_rollback_image_id is None):
+                raise DeploymentProxyPolicyError("proxy bootstrap rollback image and ID must be paired")
+            if (
+                target.bootstrap_rollback_image_id is not None
+                and not _DIGEST.fullmatch(target.bootstrap_rollback_image_id)
+            ):
+                raise DeploymentProxyPolicyError("proxy bootstrap rollback image ID is invalid")
             if (
                 not project_directory.is_absolute() or not compose_file.is_absolute()
                 or ".." in project_directory.parts or ".." in compose_file.parts
@@ -91,9 +118,6 @@ class DeploymentProxyPolicy:
         target = self.targets.get(service)
         if target is None:
             raise DeploymentProxyPolicyError("deployment target is not registered")
-        prefix = target.image_repository + "@"
-        if not image_reference.startswith(prefix) or not _DIGEST.fullmatch(image_reference[len(prefix):]):
-            raise DeploymentProxyPolicyError("image is outside the immutable repository allowlist")
         try:
             proposal_text, operation = idempotency_key.rsplit(":", 1)
             proposal_id = uuid.UUID(proposal_text)
@@ -101,6 +125,15 @@ class DeploymentProxyPolicy:
             raise DeploymentProxyPolicyError("idempotency key is invalid") from exc
         if str(proposal_id) != proposal_text or operation not in {"deploy", "rollback"}:
             raise DeploymentProxyPolicyError("idempotency key is invalid")
+        prefix = target.image_repository + "@"
+        immutable = image_reference.startswith(prefix) and _DIGEST.fullmatch(
+            image_reference[len(prefix):]
+        )
+        bootstrap_rollback = (
+            operation == "rollback" and image_reference == target.bootstrap_rollback_image
+        )
+        if not immutable and not bootstrap_rollback:
+            raise DeploymentProxyPolicyError("image is outside the exact deployment allowlist")
         return ValidatedImageRequest(target, image_reference, idempotency_key, operation)
 
 

@@ -7,7 +7,9 @@
       "composeProject": "aegis-deployment-disposable",
       "projectDirectory": "/fixtures",
       "composeFile": "/fixtures/compose.yaml",
-      "imageVariable": "AEGIS_DISPOSABLE_IMAGE"
+      "imageVariable": "AEGIS_DISPOSABLE_IMAGE",
+      "bootstrapRollbackImage": null,
+      "bootstrapRollbackImageId": null
     }
   ]
 }

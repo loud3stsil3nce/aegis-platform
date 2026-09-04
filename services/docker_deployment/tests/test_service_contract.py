@@ -35,6 +35,17 @@ class DeploymentProxyServiceContractTests(unittest.TestCase):
         self.assertIn('"composeProject": "aegis-deployment-disposable"', policy)
         self.assertNotIn("hello-aegis-hello-aegis-1", policy)
 
+    def test_production_compose_keeps_proxy_internal_and_exactly_mounted(self):
+        compose = (ROOT.parents[1] / "deploy" / "compose.docker-deployment.yaml").read_text()
+        self.assertIn("docker-deployment:", compose)
+        self.assertIn("AEGIS_DOCKER_DEPLOYMENT_TOKEN_FILE", compose)
+        self.assertIn("docker-deployment-policy.json:ro", compose)
+        self.assertIn(
+            "/home/rafiurrahman/projects/aegis-plugins/hello-aegis:/home/rafiurrahman/projects/aegis-plugins/hello-aegis:ro",
+            compose,
+        )
+        self.assertNotIn("8013:8013", compose)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -68,8 +68,11 @@ class HttpDeploymentAdapter:
 
     def current_image(self, service: str) -> str:
         image = self.state(service).get("image")
-        if not isinstance(image, str) or "@sha256:" not in image:
-            raise RuntimeAdapterError("deployment proxy did not return an immutable image")
+        if (
+            not isinstance(image, str) or not image or len(image.encode()) > 300
+            or any(character.isspace() or ord(character) < 32 for character in image)
+        ):
+            raise RuntimeAdapterError("deployment proxy returned an invalid image reference")
         return image
 
     def deploy_image(self, service: str, image_reference: str, idempotency_key: str) -> None:

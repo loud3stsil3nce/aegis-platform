@@ -53,8 +53,13 @@ class ComposeBackend:
             "image": image,
         }
 
-    def apply(self, target: ProxyTarget, image_reference: str) -> None:
-        self._run(["docker", "pull", image_reference])
+    def apply(self, target: ProxyTarget, image_reference: str, operation: str) -> None:
+        if operation == "rollback" and image_reference == target.bootstrap_rollback_image:
+            image_id = self._run(["docker", "image", "inspect", "--format", "{{.Id}}", image_reference])
+            if image_id != target.bootstrap_rollback_image_id:
+                raise ComposeBackendError("bootstrap rollback image identity changed")
+        else:
+            self._run(["docker", "pull", image_reference])
         environment = os.environ.copy()
         environment[target.image_variable] = image_reference
         self._run([

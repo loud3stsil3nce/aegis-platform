@@ -22,7 +22,7 @@ class HttpDeploymentAdapterTests(unittest.TestCase):
             "http://docker-deployment:8013", lambda: "token", poll_interval=0,
         )
 
-    def test_state_uses_encoded_target_auth_and_immutable_image(self):
+    def test_state_uses_encoded_target_auth_and_bounded_image(self):
         value = {"status": "running", "health": "healthy", "image": IMAGE}
         with patch("urllib.request.urlopen", return_value=Response(value)) as call:
             self.assertEqual(self.adapter.current_image("hello/aegis"), IMAGE)
@@ -32,6 +32,8 @@ class HttpDeploymentAdapterTests(unittest.TestCase):
             "http://docker-deployment:8013/v1/targets/hello%2Faegis/state",
         )
         self.assertEqual(request.headers["Authorization"], "Bearer token")
+        with patch("urllib.request.urlopen", return_value=Response({"image": "aegis/hello-aegis:0.1.0"})):
+            self.assertEqual(self.adapter.current_image("hello-aegis"), "aegis/hello-aegis:0.1.0")
 
     def test_deploy_sends_only_exact_image_and_idempotency_key(self):
         with patch("urllib.request.urlopen", return_value=Response({"status": "accepted"})) as call:
@@ -41,7 +43,7 @@ class HttpDeploymentAdapterTests(unittest.TestCase):
         })
 
     def test_bad_image_response_body_auth_or_origin_fails_closed(self):
-        for value in ({"image": "repo:latest"}, [], b"x" * 20_000):
+        for value in ({"image": ""}, {"image": "bad\nimage"}, [], b"x" * 20_000):
             with self.subTest(value=value), patch("urllib.request.urlopen", return_value=Response(value)):
                 with self.assertRaises(RuntimeAdapterError):
                     self.adapter.current_image("hello-aegis")

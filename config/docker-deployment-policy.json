@@ -7,7 +7,9 @@
       "composeProject": "hello-aegis",
       "projectDirectory": "/home/rafiurrahman/projects/aegis-plugins/hello-aegis",
       "composeFile": "/home/rafiurrahman/projects/aegis-plugins/hello-aegis/compose.yaml",
-      "imageVariable": "AEGIS_HELLO_AEGIS_IMAGE"
+      "imageVariable": "AEGIS_HELLO_AEGIS_IMAGE",
+      "bootstrapRollbackImage": "aegis/hello-aegis:0.1.0",
+      "bootstrapRollbackImageId": "sha256:e0076141fde0c465aa49d53f8375c3c387e89bee862f33acc7bbcaf809d2f06a"
     }
   ]
 }

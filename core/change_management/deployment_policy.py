@@ -10,6 +10,7 @@ from typing import Any
 _GIT_SHA = re.compile(r"^[0-9a-f]{40}$")
 _DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 _IMAGE_REPOSITORY = re.compile(r"^[a-z0-9]+(?:[._/-][a-z0-9]+)*$")
+_TAGGED_IMAGE = re.compile(r"^[a-z0-9]+(?:[._/-][a-z0-9]+)*:[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 
 
 class DeploymentPolicyError(ValueError):
@@ -21,6 +22,7 @@ class DeploymentTarget:
     plugin_id: str
     service: str
     image_repository: str
+    bootstrap_current_image: str | None = None
 
 
 @dataclass(frozen=True)
@@ -48,13 +50,23 @@ class DeploymentPolicy:
             raise DeploymentPolicyError("deployment policy must contain only a target list")
         targets = {}
         for item in value["targets"]:
-            if not isinstance(item, dict) or set(item) != {"pluginId", "service", "imageRepository"}:
+            if not isinstance(item, dict) or set(item) not in (
+                {"pluginId", "service", "imageRepository"},
+                {"pluginId", "service", "imageRepository", "bootstrapCurrentImage"},
+            ):
                 raise DeploymentPolicyError("deployment target fields are invalid")
             if any(not isinstance(item[field], str) for field in item):
                 raise DeploymentPolicyError("deployment target values must be strings")
-            target = DeploymentTarget(item["pluginId"], item["service"], item["imageRepository"])
+            target = DeploymentTarget(
+                item["pluginId"], item["service"], item["imageRepository"],
+                item.get("bootstrapCurrentImage"),
+            )
             if not target.plugin_id or not target.service or target.plugin_id in targets:
                 raise DeploymentPolicyError("deployment target identity is invalid or duplicated")
+            if target.bootstrap_current_image is not None and not _TAGGED_IMAGE.fullmatch(
+                target.bootstrap_current_image
+            ):
+                raise DeploymentPolicyError("bootstrap current image must be one exact tagged image")
             targets[target.plugin_id] = target
         return cls(targets)
 
@@ -70,7 +82,12 @@ class DeploymentPolicy:
         if not _DIGEST.fullmatch(image_digest):
             raise DeploymentPolicyError("deployment requires an immutable image digest")
         prefix = target.image_repository + "@"
-        if not expected_current_image.startswith(prefix) or not _DIGEST.fullmatch(expected_current_image[len(prefix):]):
+        immutable_current = (
+            expected_current_image.startswith(prefix)
+            and _DIGEST.fullmatch(expected_current_image[len(prefix):]) is not None
+        )
+        bootstrap_current = expected_current_image == target.bootstrap_current_image
+        if not immutable_current and not bootstrap_current:
             raise DeploymentPolicyError("current image is not an immutable expected-state reference")
         image_reference = prefix + image_digest
         if image_reference == expected_current_image:
