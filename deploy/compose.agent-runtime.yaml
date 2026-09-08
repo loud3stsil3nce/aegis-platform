@@ -1,0 +1,61 @@
+name: aegis-agent-runtime
+
+x-runtime: &runtime
+  build:
+    context: ..
+    dockerfile: core/agent_runtime/Dockerfile
+  image: aegis/agent-runtime:0.1.0
+  user: "${AEGIS_RUNTIME_UID:-10001}:${AEGIS_RUNTIME_GID:-10001}"
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "5"
+  tmpfs:
+    - "/tmp:size=16m,noexec,nosuid,nodev"
+
+services:
+  agent-runtime-local:
+    <<: *runtime
+    profiles: [local]
+    environment:
+      AEGIS_OLLAMA_MODEL: ${AEGIS_OLLAMA_MODEL:?Set an installed Ollama model ID}
+    command: ["python", "-m", "core.agent_runtime.verify_ollama"]
+    networks: [models]
+
+  agent-runtime-cloud:
+    <<: *runtime
+    profiles: [cloud]
+    environment:
+      AEGIS_RUNTIME_MODE: cloud
+      AEGIS_OPENROUTER_MODEL: ${AEGIS_OPENROUTER_MODEL:-}
+      AEGIS_OPENROUTER_INPUT_COST_PER_MILLION: ${AEGIS_OPENROUTER_INPUT_COST_PER_MILLION:?Set current model input cost}
+      AEGIS_OPENROUTER_OUTPUT_COST_PER_MILLION: ${AEGIS_OPENROUTER_OUTPUT_COST_PER_MILLION:?Set current model output cost}
+    volumes:
+      - "${OPENROUTER_API_KEY_FILE:-/dev/null}:/run/secrets/openrouter:ro"
+    command: ["python", "-m", "core.agent_runtime.verify_cloud"]
+    networks: [egress]
+
+  agent-runtime-mixed:
+    <<: *runtime
+    profiles: [mixed]
+    environment:
+      AEGIS_RUNTIME_MODE: mixed
+      AEGIS_OPENROUTER_MODEL: ${AEGIS_OPENROUTER_MODEL:-}
+      AEGIS_OPENROUTER_INPUT_COST_PER_MILLION: ${AEGIS_OPENROUTER_INPUT_COST_PER_MILLION:?Set current model input cost}
+      AEGIS_OPENROUTER_OUTPUT_COST_PER_MILLION: ${AEGIS_OPENROUTER_OUTPUT_COST_PER_MILLION:?Set current model output cost}
+      AEGIS_OLLAMA_MODEL: ${AEGIS_OLLAMA_MODEL:?Set an installed Ollama model ID}
+    volumes:
+      - "${OPENROUTER_API_KEY_FILE:-/dev/null}:/run/secrets/openrouter:ro"
+    command: ["python", "-m", "core.agent_runtime.verify_cloud"]
+    networks: [egress, models]
+
+networks:
+  egress:
+    driver: bridge
+  models:
+    external: true
+    name: aegis_models_internal

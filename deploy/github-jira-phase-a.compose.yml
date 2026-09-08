@@ -1,0 +1,24 @@
+services:
+  sre-agent:
+    build: !reset null
+    image: ${AEGIS_SRE_PHASE_A_IMAGE:?Set the immutable Phase A SRE image tag}
+    environment:
+      GITHUB_PAT: !reset null
+      AEGIS_CORE_PYTHON_ROOT: /app/code
+      AEGIS_GITHUB_ALLOWED_REPOSITORIES: loud3stsil3nce/aegis-platform
+      AEGIS_GITHUB_READ_APP_ID: ${AEGIS_GITHUB_READ_APP_ID:?Set the GitHub read App ID}
+      AEGIS_GITHUB_READ_INSTALLATION_ID: ${AEGIS_GITHUB_READ_INSTALLATION_ID:?Set the GitHub read App installation ID}
+      AEGIS_GITHUB_READ_PRIVATE_KEY_FILE: /run/secrets/aegis-github-read-app.pem
+      AEGIS_GITHUB_WEBHOOK_SECRET_FILE: /run/secrets/aegis-github-webhook-secret
+      AEGIS_GITHUB_JIRA_STORE: /app/state/github-jira-phase-a.sqlite3
+      AEGIS_GITHUB_POLL_ENABLED: ${AEGIS_GITHUB_POLL_ENABLED:-1}
+      AEGIS_GITHUB_POLL_INTERVAL_SECONDS: ${AEGIS_GITHUB_POLL_INTERVAL_SECONDS:-60}
+      AEGIS_GITHUB_POLL_LOOKBACK_MINUTES: ${AEGIS_GITHUB_POLL_LOOKBACK_MINUTES:-15}
+    volumes: !override
+      - .:/app/code:ro
+      - github_jira_state:/app/state
+      - ${AEGIS_GITHUB_READ_PRIVATE_KEY_HOST_PATH:?Set the owner-only GitHub read App key path}:/run/secrets/aegis-github-read-app.pem:ro
+      - ${AEGIS_GITHUB_WEBHOOK_SECRET_HOST_PATH:?Set the owner-only GitHub webhook secret path}:/run/secrets/aegis-github-webhook-secret:ro
+
+volumes:
+  github_jira_state:

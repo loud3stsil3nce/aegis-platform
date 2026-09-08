@@ -1,0 +1,56 @@
+name: aegis-observability
+
+services:
+  observability-mcp:
+    build:
+      context: ..
+      dockerfile: core/observability/Dockerfile
+    image: aegis/observability-mcp:0.1.0
+    user: "${AEGIS_RUNTIME_UID:-1000}:${AEGIS_RUNTIME_GID:-1000}"
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    environment:
+      AEGIS_PLUGIN_REGISTRY_PATH: /state/registry.sqlite3
+      AEGIS_AUDIT_PATH: /state/audit.sqlite3
+      AEGIS_PLUGIN_TOKEN_DIR: /run/aegis-plugin-tokens
+      AEGIS_OBSERVABILITY_TOKEN: ${AEGIS_OBSERVABILITY_TOKEN:?Set the operator-facing token}
+      SSL_CERT_FILE: /run/aegis-ca/remote-sample.crt
+    volumes:
+      - ${AEGIS_OBSERVABILITY_STATE_DIR:?Set state directory}:/state
+      - ${AEGIS_PLUGIN_TOKEN_DIR:?Set plugin token directory}:/run/aegis-plugin-tokens:ro
+      - ${AEGIS_MONITORED_ROOT:?Set monitored project root}:/monitored:ro
+      - ${AEGIS_REMOTE_CA_FILE:?Set remote sample CA file}:/run/aegis-ca/remote-sample.crt:ro
+    ports:
+      - "${AEGIS_OBSERVABILITY_BIND_ADDRESS:-127.0.0.1}:8020:8020"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs:
+      - "/tmp:size=16m,noexec,nosuid,nodev"
+    networks:
+      - ingress
+      - core
+      - hello-aegis
+      - remote-sample
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8020/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+networks:
+  ingress:
+    driver: bridge
+  core:
+    internal: true
+  hello-aegis:
+    external: true
+    name: hello-aegis_plugin
+  remote-sample:
+    external: true
+    name: remote-sample_plugin

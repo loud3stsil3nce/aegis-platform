@@ -1,0 +1,91 @@
+name: aegis-deployment
+
+services:
+  docker-lifecycle:
+    image: aegis/docker-lifecycle:0.1.0
+    build:
+      context: ..
+      dockerfile: services/docker-lifecycle/Dockerfile
+      args:
+        AEGIS_LIFECYCLE_UID: ${AEGIS_DEPLOYMENT_UID:?Set deployment owner UID}
+        AEGIS_LIFECYCLE_GID: ${AEGIS_DEPLOYMENT_GID:?Set deployment owner GID}
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    user: "${AEGIS_DEPLOYMENT_UID}:${AEGIS_DEPLOYMENT_GID}"
+    group_add:
+      - "${AEGIS_DOCKER_SOCKET_GID:?Set Docker socket GID}"
+    environment:
+      AEGIS_DOCKER_LIFECYCLE_TOKEN_FILE: /run/secrets/lifecycle-token
+      AEGIS_LIFECYCLE_ALLOWED_TARGETS: ${AEGIS_LIFECYCLE_ALLOWED_TARGETS:?Set exact lifecycle targets}
+      AEGIS_LIFECYCLE_STATE_PATH: /var/lib/aegis-lifecycle/idempotency.sqlite3
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - lifecycle-state:/var/lib/aegis-lifecycle
+      - ${AEGIS_DOCKER_LIFECYCLE_TOKEN_FILE:?Set lifecycle token file}:/run/secrets/lifecycle-token:ro
+    read_only: true
+    tmpfs: ["/tmp:size=16m,mode=1777"]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    networks: [lifecycle]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8011/health', timeout=3)"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 10s
+
+  deployment-api:
+    image: aegis/deployment-api:0.1.0
+    build:
+      context: ..
+      dockerfile: core/deployment/Dockerfile
+      args:
+        AEGIS_DEPLOYMENT_UID: ${AEGIS_DEPLOYMENT_UID:?Set deployment owner UID}
+        AEGIS_DEPLOYMENT_GID: ${AEGIS_DEPLOYMENT_GID:?Set deployment owner GID}
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    user: "${AEGIS_DEPLOYMENT_UID}:${AEGIS_DEPLOYMENT_GID}"
+    depends_on:
+      docker-lifecycle:
+        condition: service_healthy
+    environment:
+      AEGIS_DEPLOYMENT_ACTORS_FILE: /run/config/actors.json
+      AEGIS_DEPLOYMENT_PLUGIN_MANIFEST: /run/config/hello-aegis.json
+      AEGIS_DEPLOYMENT_STATE_PATH: /var/lib/aegis-deployment/deployment.sqlite3
+      AEGIS_DOCKER_LIFECYCLE_URL: http://docker-lifecycle:8011
+      AEGIS_DOCKER_LIFECYCLE_TOKEN_FILE: /run/secrets/lifecycle-token
+    volumes:
+      - deployment-state:/var/lib/aegis-deployment
+      - ${AEGIS_DEPLOYMENT_ACTORS_FILE:?Set deployment actor config}:/run/config/actors.json:ro
+      - ../examples/hello-aegis/aegis-plugin.yaml:/run/config/hello-aegis.json:ro
+      - ${AEGIS_DOCKER_LIFECYCLE_TOKEN_FILE:?Set lifecycle token file}:/run/secrets/lifecycle-token:ro
+      - ${AEGIS_DEPLOYMENT_REQUESTER_TOKEN_FILE:?Set requester token file}:/run/secrets/requester-token:ro
+      - ${AEGIS_DEPLOYMENT_APPROVER_TOKEN_FILE:?Set approver token file}:/run/secrets/approver-token:ro
+      - ${AEGIS_DEPLOYMENT_EXECUTOR_TOKEN_FILE:?Set executor token file}:/run/secrets/executor-token:ro
+    read_only: true
+    tmpfs: ["/tmp:size=16m,mode=1777"]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    networks: [lifecycle]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8012/health', timeout=3)"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 10s
+
+volumes:
+  lifecycle-state:
+  deployment-state:
+
+networks:
+  lifecycle:
+    internal: true

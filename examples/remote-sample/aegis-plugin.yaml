@@ -1,0 +1,20 @@
+{
+  "apiVersion": "aegis.dev/v1alpha1",
+  "kind": "Plugin",
+  "metadata": {"id": "remote-sample", "name": "Remote HTTPS Sample", "version": "0.1.0", "owner": "Aegis maintainers"},
+  "spec": {
+    "coreCompatibility": "^0.1.0",
+    "runtime": {"mode": "remote", "endpoint": "https://remote-sample:8443"},
+    "mcp": {"transport": "streamable-http", "path": "/mcp"},
+    "permissions": {
+      "capabilities": [
+        {"name": "observability.health", "risk": "R0"}, {"name": "observability.version", "risk": "R0"},
+        {"name": "observability.metrics", "risk": "R1"}, {"name": "observability.logs", "risk": "R1"}
+      ],
+      "secrets": [], "networks": ["remote-sample"], "storage": []
+    },
+    "health": {"liveness": "/health/live", "readiness": "/health/ready", "version": "/version", "metrics": "/metrics", "logs": "/logs"},
+    "lifecycle": {"manager": "aegis-cli", "supports": ["disable", "upgrade", "rollback", "remove"]},
+    "resources": {"memory": "128Mi", "cpus": 0.25}
+  }
+}
