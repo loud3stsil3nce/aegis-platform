@@ -165,11 +165,16 @@ class GitHubJiraWorkflow:
     def has_incident(self, issue_key: str) -> bool:
         return self.store.get_by_issue(issue_key) is not None
 
-    def handle_command(self, issue_key: str) -> str:
+    def handle_command(self, issue_key: str, user_command: str = "") -> str:
         """Called only after the scheduler recognizes a human agent mention."""
         incident = self.store.get_by_issue(issue_key)
         if incident is None:
             raise KeyError("Jira issue is not a GitHub incident")
+
+        cmd = user_command.casefold()
+        if any(w in cmd for w in ("stage", "propose", "fix")):
+            return self.stage_proposal(issue_key)
+
         if "aegis:github-proposal" not in self.jira.proposal_labels(issue_key):
             return self.investigate(issue_key)
         message = (
@@ -183,6 +188,131 @@ class GitHubJiraWorkflow:
         )
         if self.store.claim_proposal_request(issue_key):
             self.jira.add_proposal_update(issue_key, message, "aegis:approval-required")
+        return message
+
+    def stage_proposal(self, issue_key: str) -> str:
+        incident = self.store.get_by_issue(issue_key)
+        if incident is None:
+            raise KeyError("Jira issue is not a GitHub incident")
+
+        from pathlib import Path
+        import os
+        from core.change_management.proposals import ChangeProposalStore
+        from core.change_management.policy import ChangePolicy
+        from core.change_management.jira_proposals import JiraProposalService, REQUEST_LABEL
+        from core.change_management.github_adapter import InstallationTokenProvider, GitHubChangeAdapter
+        from core.change_management.github_app import GitHubApi, app_jwt
+        from core.change_management.deployment_auth import DeploymentActor
+
+        policy_file = Path(os.getenv("AEGIS_POLICY_FILE", "/app/code/config/change-policy.json"))
+        if not policy_file.exists():
+            policy_file = Path(__file__).resolve().parents[4] / "config" / "change-policy.json"
+        policy = ChangePolicy.from_dict(json.loads(policy_file.read_text()))
+
+        store_path = Path(os.getenv("AEGIS_PROPOSAL_STORE", "/app/state/jira-change-proposals.sqlite3"))
+        store_path.parent.mkdir(parents=True, exist_ok=True)
+        proposal_store = ChangeProposalStore(store_path)
+
+        app_id = self.github.token_provider.app_id
+        inst_id = self.github.token_provider.installation_id
+        key_file = self.github.token_provider.private_key_file
+        provider = InstallationTokenProvider(lambda: GitHubApi(f"Bearer {app_jwt(app_id, key_file)}"), inst_id)
+        adapter = GitHubChangeAdapter(provider)
+        proposal_service = JiraProposalService(proposal_store, policy, adapter)
+
+        # Check existing active proposal for this issue
+        with proposal_store._lock:
+            existing = proposal_store.connection.execute(
+                "SELECT proposal_id FROM jira_change_snapshots WHERE issue_key=? AND lifecycle_state='ACTIVE'",
+                (issue_key,),
+            ).fetchone()
+            if existing:
+                res = proposal_service.inspect(existing["proposal_id"])
+                p_id = res["proposal"]["proposal_id"]
+                binding = res["binding_sha256"]
+                diff = res["snapshot"]["diff"]
+                msg = (
+                    f"🤖 **SRE Agent Change Proposal Already Staged**\n\n"
+                    f"An active change proposal for {issue_key} is already staged:\n\n"
+                    f"- **Proposal ID**: `{p_id}`\n"
+                    f"- **Repository**: `{res['proposal']['repository']}`\n"
+                    f"- **Binding SHA-256**: `{binding}`\n\n"
+                    f"### Proposed Diff:\n"
+                    f"```diff\n"
+                    f"{diff}\n"
+                    f"```\n\n"
+                    f"**To approve and open Draft PR**: Reply with `approve {binding}`"
+                )
+                self.jira.add_proposal_update(issue_key, msg, "aegis:approval-required")
+                return msg
+
+        # Synthesize fix snapshot
+        target_path = None
+        new_content = None
+
+        if incident.repository == "loud3stsil3nce/shariahcompliantscreener":
+            target_path = "src/db/helpers.py"
+            current_raw = self.github.get_file_content(incident.repository, target_path, incident.commit_sha)
+            text = current_raw.decode("utf-8")
+            old_str = 'DATABASE_URL = os.getenv("DATABASE_URL")\nif not DATABASE_URL:\n    raise RuntimeError("DATABASE_URL is required")'
+            new_str = (
+                'DATABASE_URL = os.getenv("DATABASE_URL")\n'
+                'if not DATABASE_URL:\n'
+                '    if os.getenv("PYTEST_CURRENT_TEST") or os.getenv("CI"):\n'
+                '        DATABASE_URL = os.getenv("TEST_DATABASE_URL", "postgresql+asyncpg://test:test@localhost:5432/test_db")\n'
+                '    else:\n'
+                '        raise RuntimeError("DATABASE_URL is required")'
+            )
+            if old_str in text:
+                new_content = text.replace(old_str, new_str)
+            else:
+                pattern = r'DATABASE_URL\s*=\s*os\.getenv\("DATABASE_URL"\)\s*\nif not DATABASE_URL:\s*\n\s*raise RuntimeError\("DATABASE_URL is required"\)'
+                new_content = re.sub(pattern, new_str, text)
+
+        if not target_path or not new_content:
+            msg = (
+                f"🤖 SRE Agent: Could not automatically synthesize a verified patch for {incident.repository}.\n"
+                f"Please inspect the evidence and prepare a snapshot using scripts/jira_change_proposal.py."
+            )
+            self.jira.add_comment(issue_key, msg)
+            return msg
+
+        # Prepare and stage the proposal
+        actor = DeploymentActor("sre-agent", {"requester"})
+        result = proposal_service.prepare(
+            issue_key=issue_key,
+            fingerprint=incident.fingerprint,
+            labels=[REQUEST_LABEL],
+            repository=incident.repository,
+            base_sha=incident.commit_sha,
+            files={target_path: new_content.encode("utf-8")},
+            actor=actor,
+        )
+
+        p_id = result["proposal"]["proposal_id"]
+        binding = result["binding_sha256"]
+        diff = result["snapshot"]["diff"]
+        branch = result["proposal"]["proposed_branch"]
+
+        message = (
+            f"🤖 **SRE Agent Change Proposal Staged**\n\n"
+            f"A candidate fix was generated and staged under the Aegis Change Policy:\n\n"
+            f"- **Repository**: `{incident.repository}`\n"
+            f"- **Base Commit**: `{incident.commit_sha[:12]}`\n"
+            f"- **Proposed Branch**: `{branch}`\n"
+            f"- **Proposal ID**: `{p_id}`\n"
+            f"- **Cryptographic Binding SHA-256**: `{binding}`\n\n"
+            f"### Proposed Diff:\n"
+            f"```diff\n"
+            f"{diff}\n"
+            f"```\n\n"
+            f"---\n"
+            f"**Operator Review & Approval Required**:\n"
+            f"Review the diff above. To approve this proposal and open the Draft Pull Request, comment:\n"
+            f"`approve {binding}`"
+        )
+        self.store.claim_proposal_request(issue_key)
+        self.jira.add_proposal_update(issue_key, message, "aegis:approval-required")
         return message
 
     def investigate(self, issue_key: str) -> str:

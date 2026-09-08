@@ -7,9 +7,9 @@ import asyncio
 from .runtime import get_workflow
 
 
-async def dispatch_github_incident(issue_key: str) -> bool:
+async def dispatch_github_incident(issue_key: str, user_command: str = "") -> bool:
     workflow = get_workflow()
     if workflow is None or not workflow.has_incident(issue_key):
         return False
-    await asyncio.to_thread(workflow.handle_command, issue_key)
+    await asyncio.to_thread(workflow.handle_command, issue_key, user_command)
     return True

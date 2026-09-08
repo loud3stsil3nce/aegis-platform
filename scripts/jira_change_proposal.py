@@ -35,7 +35,7 @@ def protected_file(path: str, limit: int = 16_384) -> bytes:
     return raw
 
 
-def incident_request(path: str, issue_key: str) -> dict:
+def incident_request(path: str, issue_key: str, allowed_repositories: Any = None) -> dict:
     # Read-only connection does not migrate or mutate the deployed incident DB.
     uri = Path(path).resolve().as_uri() + "?mode=ro"
     with sqlite3.connect(uri, uri=True) as connection:
@@ -45,7 +45,7 @@ def incident_request(path: str, issue_key: str) -> dict:
             "ON r.issue_key=i.issue_key AND r.fingerprint=i.fingerprint WHERE i.issue_key=?",
             (issue_key,),
         ).fetchone()
-    if row is None or row["repository"] != REPOSITORY:
+    if row is None or (allowed_repositories is not None and row["repository"] not in allowed_repositories):
         raise ValueError("a durable labeled, human-triggered platform incident request is required")
     return dict(row)
 
@@ -124,7 +124,7 @@ def main() -> int:
     try:
         service = JiraProposalService(store, policy, GitHubChangeAdapter(provider))
         if args.command == "prepare":
-            incident = incident_request(config["incidentStore"], args.issue)
+            incident = incident_request(config["incidentStore"], args.issue, allowed_repositories=policy.repositories)
             jira = jira_adapter()
             with Path(args.snapshot).open("rb") as handle:
                 raw = handle.read(1_048_577)

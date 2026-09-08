@@ -109,6 +109,12 @@ class PhaseBRequestTests(unittest.TestCase):
         self.assertEqual(record["repository"], REPOSITORY)
         self.assertEqual(before, self.path.read_bytes())
 
+    def test_handle_command_stage_fix_routes_to_stage_proposal(self):
+        with patch.object(self.workflow, "stage_proposal", return_value="staged-message") as mocked:
+            res = self.workflow.handle_command("KAN-101", "stage fix")
+            self.assertEqual(res, "staged-message")
+            mocked.assert_called_once_with("KAN-101")
+
 
 if __name__ == "__main__":
     unittest.main()

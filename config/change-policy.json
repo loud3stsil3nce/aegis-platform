@@ -16,7 +16,7 @@
     "docs",
     "examples",
     "scripts",
-    "services",
+    "services/docker_deployment",
     "src",
     "backend",
     "frontend",

@@ -60,7 +60,7 @@ def _extract_marker_command(text):
 async def run_agent_command_safe(issue_key: str, user_command: str):
     try:
         print(f"[Polling] Launching sweep for issue {issue_key} with command: '{user_command}'", flush=True)
-        if await dispatch_github_incident(issue_key):
+        if await dispatch_github_incident(issue_key, user_command):
             return
         await execute_agent_sweep(issue_key=issue_key, user_command=user_command)
     except Exception as e:
