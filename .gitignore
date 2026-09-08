@@ -1,3 +1,5 @@
 .env
 venv-dev/
 __pycache__/
+deploy/agent-runtime.zenbook.env
+deploy/open-webui.zenbook.env

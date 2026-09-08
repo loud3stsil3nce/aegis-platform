@@ -1,0 +1,154 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aegis.local/schemas/aegis-plugin-v1.schema.json",
+  "title": "Aegis Plugin Manifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["apiVersion", "kind", "metadata", "spec"],
+  "properties": {
+    "apiVersion": {"const": "aegis.dev/v1alpha1"},
+    "kind": {"const": "Plugin"},
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "version"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$", "maxLength": 63},
+        "name": {"type": "string", "minLength": 1, "maxLength": 100},
+        "version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?$"},
+        "description": {"type": "string", "maxLength": 500},
+        "owner": {"type": "string", "minLength": 1, "maxLength": 200}
+      }
+    },
+    "spec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["coreCompatibility", "runtime", "permissions", "health", "lifecycle"],
+      "properties": {
+        "coreCompatibility": {"type": "string", "pattern": "^(\\^|~|>=)?[0-9]+\\.[0-9]+\\.[0-9]+$"},
+        "runtime": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode"],
+          "properties": {
+            "mode": {"enum": ["remote", "managed-container", "monitored-project"]},
+            "endpoint": {"type": "string", "pattern": "^https?://"},
+            "composeFile": {"type": "string", "pattern": "^[^/]"},
+            "service": {"type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]*$"},
+            "projectPath": {"type": "string", "pattern": "^/"},
+            "readOnly": {"type": "boolean"},
+            "statusFile": {"type": "string", "pattern": "^[^/]"},
+            "versionFile": {"type": "string", "pattern": "^[^/]"},
+            "metricsFile": {"type": "string", "pattern": "^[^/]"},
+            "logFile": {"type": "string", "pattern": "^[^/]"}
+          }
+        },
+        "mcp": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "required": ["transport", "path"],
+          "properties": {
+            "transport": {"const": "streamable-http"},
+            "path": {"type": "string", "pattern": "^/", "maxLength": 200}
+          }
+        },
+        "permissions": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["capabilities", "secrets", "networks", "storage"],
+          "properties": {
+            "capabilities": {
+              "type": "array", "uniqueItems": true,
+              "items": {
+                "type": "object", "additionalProperties": false,
+                "required": ["name", "risk"],
+                "properties": {
+                  "name": {"type": "string", "pattern": "^[a-z][a-z0-9_.-]*$"},
+                  "risk": {"enum": ["R0", "R1", "R2", "R3", "R4", "R5"]},
+                  "description": {"type": "string", "maxLength": 300}
+                }
+              }
+            },
+            "secrets": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]*$"}},
+            "networks": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z][a-z0-9_.-]*$"}},
+            "storage": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z][a-z0-9_.-]*$"}}
+          }
+        },
+        "health": {
+          "type": "object", "additionalProperties": false,
+          "required": ["liveness", "readiness", "version", "metrics", "logs"],
+          "properties": {
+            "liveness": {"type": "string", "pattern": "^/"},
+            "readiness": {"type": "string", "pattern": "^/"},
+            "version": {"type": "string", "pattern": "^/"},
+            "metrics": {"type": "string", "pattern": "^/"},
+            "logs": {"type": "string", "pattern": "^/"}
+          }
+        },
+        "lifecycle": {
+          "type": "object", "additionalProperties": false,
+          "required": ["manager", "supports"],
+          "properties": {
+            "manager": {"const": "aegis-cli"},
+            "supports": {
+              "type": "array", "uniqueItems": true, "minItems": 4,
+              "items": {"enum": ["disable", "upgrade", "rollback", "remove", "restart"]},
+              "allOf": [
+                {"contains": {"const": "disable"}},
+                {"contains": {"const": "upgrade"}},
+                {"contains": {"const": "rollback"}},
+                {"contains": {"const": "remove"}}
+              ]
+            },
+            "restart": {
+              "type": "object", "additionalProperties": false,
+              "required": ["action", "target", "healthTimeoutSeconds"],
+              "properties": {
+                "action": {"const": "plugin.restart"},
+                "target": {"type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$"},
+                "healthTimeoutSeconds": {"type": "integer", "minimum": 5, "maximum": 300}
+              }
+            }
+          },
+          "allOf": [{
+            "if": {"properties": {"supports": {"contains": {"const": "restart"}}}},
+            "then": {"required": ["restart"]},
+            "else": {"not": {"required": ["restart"]}}
+          }]
+        },
+        "resources": {
+          "type": "object", "additionalProperties": false,
+          "properties": {
+            "memory": {"type": "string", "pattern": "^[0-9]+(Mi|Gi)$"},
+            "cpus": {"type": "number", "exclusiveMinimum": 0, "maximum": 64}
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"runtime": {"properties": {"mode": {"const": "remote"}}}}},
+          "then": {
+            "required": ["mcp"],
+            "properties": {"runtime": {"required": ["endpoint"]}}
+          }
+        },
+        {
+          "if": {"properties": {"runtime": {"properties": {"mode": {"const": "managed-container"}}}}},
+          "then": {
+            "required": ["mcp"],
+            "properties": {"runtime": {"required": ["composeFile", "service"]}}
+          }
+        },
+        {
+          "if": {"properties": {"runtime": {"properties": {"mode": {"const": "monitored-project"}}}}},
+          "then": {
+            "properties": {
+              "runtime": {"required": ["projectPath", "readOnly", "statusFile", "versionFile", "metricsFile", "logFile"], "properties": {"readOnly": {"const": true}}},
+              "mcp": {"type": "null"}
+            }
+          }
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "actors": [
+    {"id": "operator-requester", "roles": ["requester"], "tokenFile": "/run/secrets/requester-token"},
+    {"id": "operator-approver", "roles": ["approver"], "tokenFile": "/run/secrets/approver-token"},
+    {"id": "deployment-runtime", "roles": ["executor"], "tokenFile": "/run/secrets/executor-token"}
+  ]
+}
