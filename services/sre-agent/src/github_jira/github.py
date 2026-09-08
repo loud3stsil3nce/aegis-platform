@@ -297,7 +297,7 @@ class GitHubReadClient:
 
     def get_file_content(self, repository: str, path: str, ref: str) -> bytes:
         encoded_path = urllib.parse.quote(path.strip("/"))
-        data = self._json(repository, f"/contents/{encoded_path}?ref={urllib.parse.quote(ref)}")
+        data = self._json(repository, f"{self._root(repository)}/contents/{encoded_path}?ref={urllib.parse.quote(ref)}")
         if isinstance(data, dict) and data.get("encoding") == "base64" and "content" in data:
             return base64.b64decode(data["content"])
         raise GitHubReadError(f"unable to read file content for {path} at {ref}")
