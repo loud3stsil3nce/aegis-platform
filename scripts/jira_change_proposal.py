@@ -51,7 +51,9 @@ def incident_request(path: str, issue_key: str) -> dict:
 
 
 def jira_adapter():
+    # pyrefly: ignore [missing-import]
     from jira import JIRA
+    # pyrefly: ignore [missing-import]
     from src.github_jira.jira import JiraIncidentAdapter
 
     client = JIRA(
