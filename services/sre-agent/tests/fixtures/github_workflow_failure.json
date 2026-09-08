@@ -1,0 +1,15 @@
+{
+  "action": "completed",
+  "repository": {
+    "full_name": "loud3stsil3nce/aegis-platform"
+  },
+  "workflow_run": {
+    "id": 987654321,
+    "name": "Phase A Synthetic CI",
+    "status": "completed",
+    "conclusion": "failure",
+    "head_branch": "aegis/phase-a-fixture",
+    "head_sha": "0123456789abcdef0123456789abcdef01234567",
+    "html_url": "https://github.com/loud3stsil3nce/aegis-platform/actions/runs/987654321"
+  }
+}
