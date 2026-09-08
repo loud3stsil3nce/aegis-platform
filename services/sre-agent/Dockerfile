@@ -1,22 +1,23 @@
+FROM python:3.12-slim AS builder
+
+RUN apt-get update && apt-get install -y --no-install-recommends build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt /tmp/requirements.txt
+RUN pip wheel --no-cache-dir --wheel-dir /wheels -r /tmp/requirements.txt
+
 FROM python:3.12-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    curl \
     ca-certificates \
+    openssl \
     procps \
-    && curl -sSL https://download.docker.com/linux/static/stable/x86_64/docker-26.1.4.tgz | tar -xz -C /tmp \
-    && mv /tmp/docker/docker /usr/bin/docker \
-    && rm -rf /tmp/docker \
-    && apt-get purge -y curl \
-    && apt-get autoremove -y \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# We are now installing the requirements!
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY --from=builder /wheels /wheels
+RUN pip install --no-cache-dir /wheels/* && rm -rf /wheels
 
 COPY . .
 
