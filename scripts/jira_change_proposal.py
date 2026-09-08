@@ -76,10 +76,10 @@ def main() -> int:
     prepare.add_argument("--retry-of", help="exact abandoned predecessor ID")
     prepare.add_argument("--retry-binding", help="reviewed predecessor binding hash")
     sub.add_parser("export-ci", help="emit metadata-only manifest for an operator-controlled read-only SRE mount")
-    for name in ("inspect", "approve", "execute", "notify", "abandon"):
+    for name in ("inspect", "approve", "execute", "notify", "abandon", "merge", "notify-merge"):
         command = sub.add_parser(name)
         command.add_argument("--proposal", required=True)
-        if name in {"approve", "execute", "abandon"}:
+        if name in {"approve", "execute", "abandon", "merge"}:
             command.add_argument("--binding", required=True)
     args = parser.parse_args()
     config = json.loads(protected_file(args.config))
@@ -92,14 +92,15 @@ def main() -> int:
         if len(token) < 32 or token in hashes:
             raise ValueError("operator identities require distinct tokens of at least 32 bytes")
         hashes.add(token)
-        if record.get("roles") not in (["requester"], ["approver"], ["executor"]):
-            raise ValueError("each Phase B identity must have exactly one role")
+        if record.get("roles") not in (["requester"], ["approver"], ["executor"], ["merge-approver"]):
+            raise ValueError("each identity must have exactly one documented role")
     actor = DeploymentActorAuthenticator(config["actors"]).authenticate(
         "Bearer " + protected_file(args.actor_token_file, 4096).decode().strip()
     )
     role = {
         "prepare": "requester", "approve": "approver", "execute": "executor",
         "notify": "executor", "abandon": "approver", "export-ci": "executor",
+        "merge": "merge-approver", "notify-merge": "merge-approver",
     }
     if args.command in role:
         require_role(actor, role[args.command])
@@ -111,7 +112,7 @@ def main() -> int:
     os.umask(0o077)
     policy = ChangePolicy.from_dict(json.loads(Path(config["policy"]).read_text()))
     # App keys are needed only for GitHub operations, never inspect/notify.
-    if args.command in {"prepare", "approve", "execute"}:
+    if args.command in {"prepare", "approve", "execute", "merge"}:
         protected_file(config["privateKeyFile"])
     provider = InstallationTokenProvider(
         lambda: GitHubApi(f"Bearer {app_jwt(config['appId'], config['privateKeyFile'])}"),
@@ -159,6 +160,11 @@ def main() -> int:
             result = service.approve(args.proposal, binding=args.binding, actor=actor)
         elif args.command == "execute":
             result = service.execute(args.proposal, binding=args.binding, actor=actor)
+        elif args.command == "merge":
+            result = service.merge_proposal(args.proposal, binding=args.binding, actor=actor)
+        elif args.command == "notify-merge":
+            service.notify_merge(args.proposal, jira=jira_adapter(), actor=actor)
+            result = service.inspect(args.proposal)
         else:
             service.notify(args.proposal, jira=jira_adapter(), actor=actor)
             result = service.inspect(args.proposal)

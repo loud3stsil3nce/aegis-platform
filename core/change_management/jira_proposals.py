@@ -117,6 +117,8 @@ class JiraProposalService:
                 )
                 store.connection.execute("DROP TABLE jira_change_snapshots")
                 store.connection.execute("ALTER TABLE jira_change_snapshots_c RENAME TO jira_change_snapshots")
+            if "merge_commit_sha" not in columns:
+                store.connection.execute("ALTER TABLE jira_change_snapshots ADD COLUMN merge_commit_sha TEXT")
             store.connection.execute(
                 "CREATE UNIQUE INDEX IF NOT EXISTS jira_one_active_proposal "
                 "ON jira_change_snapshots(issue_key) WHERE lifecycle_state='ACTIVE'"
@@ -225,6 +227,7 @@ class JiraProposalService:
                 "result": json.loads(row["result_json"]) if row["result_json"] else None,
                 "notification_state": row["notification_state"],
                 "lifecycle_state": row["lifecycle_state"],
+                "merge_commit_sha": row["merge_commit_sha"] if "merge_commit_sha" in row.keys() else None,
             }
 
     def _checked(self, proposal_id: str, binding: str):
@@ -409,3 +412,85 @@ class JiraProposalService:
                 "UPDATE jira_change_snapshots SET notification_state='SENT' WHERE proposal_id=?", (proposal_id,),
             )
             self.store._event(proposal_id, REPOSITORY, "JIRA_NOTIFIED", actor.actor_id, "draft PR linked to bound issue")
+
+    def merge_proposal(
+        self, proposal_id: str, *, binding: str, actor: DeploymentActor, github_api: Any = None,
+    ) -> dict[str, Any]:
+        require_role(actor, "merge-approver")
+        record = self.inspect(proposal_id)
+        if record["binding_sha256"] != binding:
+            raise ChangeApprovalError("operator must supply the exact reviewed binding hash")
+        proposal = record["proposal"]
+        if actor.actor_id == proposal["requested_by"]:
+            raise ChangeApprovalError("separation of duties: merge approver must differ from requester")
+        if record["result"] is None:
+            raise ChangeApprovalError("cannot merge proposal without an active PR execution result")
+        if record["lifecycle_state"] == "MERGED":
+            raise ChangeApprovalError("proposal has already been merged")
+        if record["lifecycle_state"] != "ACTIVE":
+            raise ChangeApprovalError("cannot merge inactive or abandoned proposal")
+
+        pr_num = record["result"]["pull_request_number"]
+        root = f"/repos/{REPOSITORY}"
+        api = github_api
+        if api is None:
+            api = self.adapter.token_provider.issue(REPOSITORY, write=True)
+
+        # 1. Check PR state and mergeable status
+        pr = api.request("GET", f"{root}/pulls/{pr_num}")
+        if pr.get("state") != "open":
+            raise ChangeApprovalError("PR is not open on GitHub")
+        if pr.get("mergeable") is False:
+            raise ChangeApprovalError("PR has conflicts and is not mergeable")
+
+        # 2. Check branch protection review rule (at least one approved review)
+        reviews = api.request("GET", f"{root}/pulls/{pr_num}/reviews")
+        approved_reviews = [r for r in reviews if r.get("state") == "APPROVED"]
+        if not approved_reviews:
+            raise ChangeApprovalError("PR must have an approving review before merge")
+
+        # 3. Merge PR via GitHub API
+        merge_payload = {
+            "commit_title": f"{record['snapshot']['issue_key']}: merge proposal {proposal_id}",
+            "commit_message": f"Proposal ID: {proposal_id}\nBinding SHA-256: {binding}\nApproved by: {actor.actor_id}\nDraft PR #{pr_num}",
+            "merge_method": "squash",
+        }
+        merge_res = api.request("PUT", f"{root}/pulls/{pr_num}/merge", merge_payload)
+        if not merge_res.get("merged"):
+            raise ChangeApprovalError(f"GitHub merge failed: {merge_res.get('message', 'unknown')}")
+
+        merge_sha = merge_res["sha"]
+        with self.store._lock, self.store.connection:
+            self.store.connection.execute(
+                "UPDATE jira_change_snapshots SET lifecycle_state='MERGED', merge_commit_sha=? WHERE proposal_id=?",
+                (merge_sha, proposal_id),
+            )
+            self.store._event(
+                proposal_id, REPOSITORY, "MERGED", actor.actor_id,
+                canonical({"pull_request_number": pr_num, "merge_commit_sha": merge_sha}),
+            )
+        return {
+            "proposal_id": proposal_id,
+            "pull_request_number": pr_num,
+            "merged": True,
+            "merge_commit_sha": merge_sha,
+            "actor": actor.actor_id,
+        }
+
+    def notify_merge(self, proposal_id: str, *, jira: Any, actor: DeploymentActor) -> None:
+        require_role(actor, "merge-approver")
+        record = self.inspect(proposal_id)
+        if record["lifecycle_state"] != "MERGED" or not record.get("merge_commit_sha"):
+            raise ChangeApprovalError("proposal must be in MERGED state to notify")
+        jira.add_proposal_update(
+            record["snapshot"]["issue_key"],
+            f"Aegis PR merged: {record['result']['pull_request_url']}\n"
+            f"Merge commit: {record['merge_commit_sha']}\n"
+            f"Proposal ID: {proposal_id}\n"
+            f"Binding SHA-256: {record['binding_sha256']}\n"
+            f"Approved by merge-approver: {actor.actor_id}\n"
+            "Ready for governed immutable deployment.",
+            "aegis:merged",
+        )
+        with self.store._lock, self.store.connection:
+            self.store._event(proposal_id, REPOSITORY, "JIRA_MERGE_NOTIFIED", actor.actor_id, "PR merge posted to Jira")
