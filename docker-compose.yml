@@ -1,25 +1,60 @@
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
 services:
   db:
     image: postgres:15-alpine
     container_name: aegis_db
     restart: always
     environment:
-      POSTGRES_USER: Rafiur
-      POSTGRES_PASSWORD: Rafiur123
+      POSTGRES_USER: ${AEGIS_POSTGRES_USER:-Rafiur}
+      POSTGRES_PASSWORD: ${AEGIS_POSTGRES_PASSWORD:?Set AEGIS_POSTGRES_PASSWORD in .env}
       POSTGRES_DB: aegis_platform
     ports:
-      - "5433:5432"
+      # Default to loopback. The Zenbook deployment overrides this with its
+      # Tailscale address so the database is never exposed on the LAN.
+      - "${AEGIS_DB_BIND_ADDRESS:-127.0.0.1}:5433:5432"
     volumes:
       - ./init.sql:/docker-entrypoint-initdb.d/init.sql 
       - postgres_data:/var/lib/postgresql/data  
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U Rafiur -d aegis_platform"]
+      test: ["CMD-SHELL", "pg_isready -U ${AEGIS_POSTGRES_USER:-Rafiur} -d aegis_platform"]
       interval: 5s
       timeout: 5s
       retries: 5
+    logging: *default-logging
     networks:
       - data_tier
-  
+
+  docker-observer:
+    build: ./services/docker-observer
+    container_name: aegis_docker_observer
+    restart: unless-stopped
+    environment:
+      AEGIS_DOCKER_OBSERVER_TOKEN: ${AEGIS_DOCKER_OBSERVER_TOKEN:?Set AEGIS_DOCKER_OBSERVER_TOKEN in .env}
+      AEGIS_ALLOWED_CONTAINERS: ${AEGIS_ALLOWED_CONTAINERS:-}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - observability_tier
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8010/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    logging: *default-logging
+
   sre-agent:
     build: ./services/sre-agent
     container_name: sre_agent
@@ -29,26 +64,54 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      docker-observer:
+        condition: service_healthy
     environment:                                                                                                                                                                                                                                                                                
-      DATABASE_URL: postgresql+asyncpg://Rafiur:Rafiur123@db:5432/db_sre
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
-      OPENAI_API_KEY: ${OPENAI_API_KEY}
-      JIRA_URL: ${JIRA_URL}
-      JIRA_USER_EMAIL: ${JIRA_USER_EMAIL}
-      JIRA_API_TOKEN: ${JIRA_API_TOKEN}
-      JIRA_PROJECT_KEY: ${JIRA_PROJECT_KEY}                                                                                                                                                                                                                                                     
-      GITHUB_PAT: ${GITHUB_PAT}
+      DATABASE_URL: postgresql+asyncpg://${SRE_DB_USER:-aegis_sre_app}:${SRE_DB_PASSWORD:?Set SRE_DB_PASSWORD in .env}@db:5432/db_sre
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      SRE_LLM_PROVIDER: ${SRE_LLM_PROVIDER:-auto}
+      SRE_LLM_FALLBACK_PROVIDER: ${SRE_LLM_FALLBACK_PROVIDER:-gemini}
+      SRE_OPENAI_MODEL: ${SRE_OPENAI_MODEL:-gpt-4.1-mini}
+      SRE_GEMINI_MODEL: ${SRE_GEMINI_MODEL:-gemini-3.6-flash}
+      JIRA_URL: ${JIRA_URL:-}
+      JIRA_USER_EMAIL: ${JIRA_USER_EMAIL:-}
+      JIRA_API_TOKEN: ${JIRA_API_TOKEN:-}
+      JIRA_PROJECT_KEY: ${JIRA_PROJECT_KEY:-}
+      AEGIS_MCP_API_KEY: ${AEGIS_MCP_API_KEY:?Set AEGIS_MCP_API_KEY in .env}
+      AEGIS_JIRA_WEBHOOK_SECRET: ${AEGIS_JIRA_WEBHOOK_SECRET:?Set AEGIS_JIRA_WEBHOOK_SECRET in .env}
+      AEGIS_CORE_PYTHON_ROOT: /app/code
+      AEGIS_GITHUB_ALLOWED_REPOSITORIES: ${AEGIS_GITHUB_ALLOWED_REPOSITORIES:-}
+      AEGIS_GITHUB_READ_APP_ID: ${AEGIS_GITHUB_READ_APP_ID:-}
+      AEGIS_GITHUB_READ_INSTALLATION_ID: ${AEGIS_GITHUB_READ_INSTALLATION_ID:-}
+      AEGIS_GITHUB_READ_PRIVATE_KEY_FILE: ${AEGIS_GITHUB_READ_PRIVATE_KEY_FILE:-}
+      AEGIS_GITHUB_WEBHOOK_SECRET_FILE: ${AEGIS_GITHUB_WEBHOOK_SECRET_FILE:-}
+      AEGIS_GITHUB_JIRA_STORE: /app/state/github-jira-phase-a.sqlite3
+      AEGIS_GITHUB_POLL_ENABLED: ${AEGIS_GITHUB_POLL_ENABLED:-0}
+      AEGIS_GITHUB_POLL_INTERVAL_SECONDS: ${AEGIS_GITHUB_POLL_INTERVAL_SECONDS:-60}
+      AEGIS_GITHUB_POLL_LOOKBACK_MINUTES: ${AEGIS_GITHUB_POLL_LOOKBACK_MINUTES:-15}
+      AEGIS_ALLOWED_CONTAINERS: ${AEGIS_ALLOWED_CONTAINERS:-}
+      AEGIS_DOCKER_OBSERVER_URL: http://docker-observer:8010
+      AEGIS_DOCKER_OBSERVER_TOKEN: ${AEGIS_DOCKER_OBSERVER_TOKEN:?Set AEGIS_DOCKER_OBSERVER_TOKEN in .env}
     volumes:
-      # lets the agent talk to the Docker daemon
-      - /var/run/docker.sock:/var/run/docker.sock
       # Mount your project code if the agent needs to analyze it
       - .:/app/code:ro
       - ./services/sre-agent:/app:cached
+      - github_jira_state:/app/state
     networks:
       - backend_tier
       - data_tier
+      - observability_tier
     ports:
-      - "8002:8002"
+      - "${AEGIS_SRE_BIND_ADDRESS:-127.0.0.1}:8002:8002"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8002/', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    logging: *default-logging
 
 
   shariah-screener:
@@ -59,7 +122,7 @@ services:
       - db
     environment:
       # Use the 'db' service name as the host
-      DATABASE_URL: postgresql+asyncpg://Rafiur:Rafiur123@db:5432/db_screener
+      DATABASE_URL: postgresql+asyncpg://${SCREENER_DB_USER:-shariah_screener_app}:${SCREENER_DB_PASSWORD:?Set SCREENER_DB_PASSWORD in .env}@db:5432/db_screener
     ports:
       - "8001:8001"
     volumes:
@@ -69,12 +132,20 @@ services:
       - backend_tier
       - data_tier
       - frontend_tier
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/docs', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    logging: *default-logging
   shariah-screener-ui:
     build: ./services/shariahcompliantscreener/frontend
     container_name: shariahscreener_ui
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      # Port 3000 is reserved for Open WebUI on zenbook-server.
+      - "3002:3000"
     volumes:
       - ./services/shariahcompliantscreener/frontend:/app:cached 
       - /app/node_modules
@@ -83,34 +154,48 @@ services:
       - frontend_tier                                                                                                                                                                                                                            
     depends_on:
       - shariah-screener
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1:3000/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 45s
+    logging: *default-logging
 
 
 
   reeftracker:
     image: mcr.microsoft.com/devcontainers/python:3.12
     container_name: reeftracker_app
+    restart: unless-stopped
     working_dir: /workspaces
     volumes:
       - ./services/reeftracker:/workspaces:cached
     ports:
       - "8000:8000"
-      - "8003:8003"
     depends_on:
       db:
         condition: service_healthy
     environment:
-      DATABASE_URL: "postgresql://Rafiur:Rafiur123@db:5432/db_reeftracker"
+      DATABASE_URL: "postgresql://${REEF_DB_USER:-reeftracker_app_role}:${REEF_DB_PASSWORD:?Set REEF_DB_PASSWORD in .env}@db:5432/db_reeftracker"
       DJANGO_SETTINGS_MODULE: "ReefTracker.settings"
       DEBUG: "1"
     command: >
       bash -c "python -m venv /opt/venv &&
                /opt/venv/bin/pip install -r requirements.txt &&
                /opt/venv/bin/python manage.py migrate --noinput &&
-               (/opt/venv/bin/python mcp_server.py & exec /opt/venv/bin/python manage.py runserver 0.0.0.0:8000)"
+               exec /opt/venv/bin/python manage.py runserver 0.0.0.0:8000"
     networks:
       - backend_tier
       - data_tier
       - frontend_tier
+    healthcheck:
+      test: ["CMD", "/opt/venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 90s
+    logging: *default-logging
   
   
   
@@ -123,8 +208,8 @@ services:
         condition: service_healthy
     environment:
       
-      DATABASE_URL: postgresql+asyncpg://Rafiur:Rafiur123@db:5432/db_e2ee_messenger
-      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-default_secret_key}
+      DATABASE_URL: postgresql+asyncpg://${MESSAGING_DB_USER:-e2ee_messenger_app}:${MESSAGING_DB_PASSWORD:?Set MESSAGING_DB_PASSWORD in .env}@db:5432/db_e2ee_messenger
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?Set ENCRYPTION_KEY in .env}
     volumes:
       - ./services/e2ee-messenger:/app:cached
     networks:
@@ -133,10 +218,18 @@ services:
       - frontend_tier
     ports:
       - "8080:8080"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    logging: *default-logging
 
 
 volumes:
   postgres_data:
+  github_jira_state:
 
 networks:
   frontend_tier:
@@ -145,3 +238,6 @@ networks:
     driver: bridge
   data_tier:
     driver: bridge
+  observability_tier:
+    driver: bridge
+    internal: true

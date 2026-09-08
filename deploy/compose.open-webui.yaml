@@ -1,0 +1,54 @@
+name: aegis-open-webui
+
+services:
+  open-webui:
+    image: ghcr.io/open-webui/open-webui@sha256:6a773e5c3a246b65cbe74ce942b294292c0e5f81c138f703d111bc162f7d7c3d
+    container_name: open-webui
+    restart: always
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    ports:
+      - "${OPEN_WEBUI_BIND:-127.0.0.1}:3000:8080"
+    environment:
+      OLLAMA_BASE_URL: http://ollama:11434
+      WEBUI_SECRET_KEY_FILE: /app/backend/data/.webui_secret_key
+      WEBUI_URL: http://${OPEN_WEBUI_BIND:-127.0.0.1}:3000
+      CORS_ALLOW_ORIGIN: http://${OPEN_WEBUI_BIND:-127.0.0.1}:3000
+      DO_NOT_TRACK: "true"
+      ANONYMIZED_TELEMETRY: "false"
+      RAG_EMBEDDING_MODEL: sentence-transformers/all-MiniLM-L6-v2
+      AUXILIARY_EMBEDDING_MODEL: TaylorAI/bge-micro-v2
+      USE_EMBEDDING_MODEL_DOCKER: sentence-transformers/all-MiniLM-L6-v2
+      USE_AUXILIARY_EMBEDDING_MODEL_DOCKER: TaylorAI/bge-micro-v2
+    volumes:
+      - open-webui-data:/app/backend/data
+    networks:
+      - frontend
+      - models
+      - observability
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      test: [CMD, curl, -fsS, http://127.0.0.1:8080/health]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+volumes:
+  open-webui-data:
+    external: true
+    name: homelab_open-webui_data
+
+networks:
+  frontend:
+    driver: bridge
+  models:
+    external: true
+    name: aegis_models_internal
+  observability:
+    external: true
+    name: aegis-observability_ingress

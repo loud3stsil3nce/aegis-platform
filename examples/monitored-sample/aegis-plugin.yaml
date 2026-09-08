@@ -1,0 +1,30 @@
+{
+  "apiVersion": "aegis.dev/v1alpha1",
+  "kind": "Plugin",
+  "metadata": {"id": "monitored-sample", "name": "Monitored Sample", "version": "0.1.0", "owner": "Aegis maintainers"},
+  "spec": {
+    "coreCompatibility": "^0.1.0",
+    "runtime": {
+      "mode": "monitored-project",
+      "projectPath": "/monitored/monitored-sample",
+      "readOnly": true,
+      "statusFile": "status.json",
+      "versionFile": "version.json",
+      "metricsFile": "metrics.json",
+      "logFile": "logs/app.log"
+    },
+    "mcp": null,
+    "permissions": {
+      "capabilities": [
+        {"name": "observability.health", "risk": "R0"},
+        {"name": "observability.version", "risk": "R0"},
+        {"name": "observability.metrics", "risk": "R1"},
+        {"name": "observability.logs", "risk": "R1"}
+      ],
+      "secrets": [], "networks": [], "storage": []
+    },
+    "health": {"liveness": "/status", "readiness": "/status", "version": "/version", "metrics": "/metrics", "logs": "/logs"},
+    "lifecycle": {"manager": "aegis-cli", "supports": ["disable", "upgrade", "rollback", "remove"]},
+    "resources": {"memory": "64Mi", "cpus": 0.1}
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "providers": [
+    {"id": "local", "adapter": "ollama-openai", "baseUrl": "http://ollama:11434/v1", "model": "configured-at-install", "apiKeyEnv": null},
+    {"id": "cloud", "adapter": "openrouter", "baseUrl": "https://openrouter.ai/api/v1", "model": "openai/gpt-4.1-mini", "apiKeyFile": "/run/secrets/openrouter", "inputCostPerMillion": 0.40, "outputCostPerMillion": 1.60}
+  ],
+  "policy": {
+    "max_wall_seconds": 120,
+    "max_turns": 8,
+    "max_tool_calls": 12,
+    "max_input_tokens": 32000,
+    "max_output_tokens": 8000,
+    "max_cost_usd": 1.0,
+    "provider_retries": 2,
+    "circuit_failure_threshold": 3,
+    "request_timeout_seconds": 30
+  }
+}
