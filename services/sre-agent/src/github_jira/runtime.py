@@ -41,9 +41,10 @@ def _owner_only_secret_file(name: str) -> str:
 
 
 def build_workflow() -> GitHubJiraWorkflow:
-    repository = _required("AEGIS_GITHUB_ALLOWED_REPOSITORIES")
-    if repository != PHASE_A_REPOSITORY:
-        raise RuntimeError("Phase A allows exactly loud3stsil3nce/aegis-platform")
+    raw_repos = _required("AEGIS_GITHUB_ALLOWED_REPOSITORIES")
+    repositories = frozenset(r.strip() for r in raw_repos.split(",") if r.strip())
+    if not repositories:
+        raise RuntimeError("No GitHub repositories configured in AEGIS_GITHUB_ALLOWED_REPOSITORIES")
     core_root = os.getenv("AEGIS_CORE_PYTHON_ROOT", "/app/code")
     if core_root not in sys.path:
         sys.path.insert(0, core_root)
@@ -69,7 +70,7 @@ def build_workflow() -> GitHubJiraWorkflow:
     )
     jira_adapter = JiraIncidentAdapter(jira_client, _required("JIRA_PROJECT_KEY"))
     token_provider = ReadOnlyInstallationTokenProvider(app_id, installation_id, private_key)
-    github = GitHubReadClient(token_provider, {repository})
+    github = GitHubReadClient(token_provider, repositories)
     store_path = Path(
         os.getenv("AEGIS_GITHUB_JIRA_STORE", "/app/state/github-jira-phase-a.sqlite3")
     )
@@ -79,7 +80,7 @@ def build_workflow() -> GitHubJiraWorkflow:
         github,
         jira_adapter,
         _owner_only_secret_file("AEGIS_GITHUB_WEBHOOK_SECRET_FILE"),
-        {repository},
+        repositories,
     )
 
 

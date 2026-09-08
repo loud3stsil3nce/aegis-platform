@@ -143,12 +143,14 @@ async def poll_github_failures_job():
     workflow = get_workflow()
     if workflow is None:
         return
-    repository = os.getenv("AEGIS_GITHUB_ALLOWED_REPOSITORIES", "")
+    raw_repos = os.getenv("AEGIS_GITHUB_ALLOWED_REPOSITORIES", "")
+    repos = [r.strip() for r in raw_repos.split(",") if r.strip()]
     lookback = int(os.getenv("AEGIS_GITHUB_POLL_LOOKBACK_MINUTES", "15"))
-    try:
-        await asyncio.to_thread(workflow.poll_repository, repository, lookback)
-    except Exception as e:
-        print(f"[GitHub Polling] Recovery poll failed: {type(e).__name__}", flush=True)
+    for repository in repos:
+        try:
+            await asyncio.to_thread(workflow.poll_repository, repository, lookback)
+        except Exception as e:
+            print(f"[GitHub Polling] Recovery poll failed for {repository}: {type(e).__name__}", flush=True)
 
 async def poll_github_ci_job():
     try:
