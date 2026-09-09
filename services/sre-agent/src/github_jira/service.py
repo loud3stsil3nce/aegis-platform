@@ -275,13 +275,11 @@ class GitHubJiraWorkflow:
             explanation = ""
 
             log_text = ""
-            if incident.evidence and incident.evidence.logs:
-                log_text = incident.evidence.logs
-            elif incident.run_id and incident.source_kind == "workflow_run":
+            if incident.run_id and incident.source_kind == "workflow_run":
                 try:
                     evidence = self.github.fetch_evidence(incident.as_event())
                     for job in evidence.jobs:
-                        if job.get("conclusion") == "failure":
+                        if job.get("conclusion") == "failure" and "id" in job:
                             raw_log = self.github._download_job_log(incident.repository, job["id"])
                             log_text = raw_log.decode("utf-8", errors="replace")
                             break
@@ -294,8 +292,8 @@ class GitHubJiraWorkflow:
                     base_sha=base_sha,
                     log_text=log_text,
                     github=self.github,
-                    symptom=incident.symptom,
-                    likely_cause=incident.likely_cause,
+                    symptom=f"Workflow '{incident.workflow}' concluded '{incident.conclusion}'",
+                    likely_cause=f"Failure in workflow '{incident.workflow}' on commit {incident.commit_sha[:12]}",
                 )
                 if synth_result and synth_result.files:
                     patch_files = synth_result.files
