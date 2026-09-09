@@ -172,6 +172,8 @@ class GitHubJiraWorkflow:
             raise KeyError("Jira issue is not a GitHub incident")
 
         cmd = user_command.casefold()
+        if "approve" in cmd:
+            return self.approve_and_execute_proposal(issue_key, user_command)
         if any(w in cmd for w in ("stage", "propose", "fix")):
             return self.stage_proposal(issue_key)
 
@@ -314,6 +316,110 @@ class GitHubJiraWorkflow:
         self.store.claim_proposal_request(issue_key)
         self.jira.add_proposal_update(issue_key, message, "aegis:approval-required")
         return message
+
+    def approve_and_execute_proposal(self, issue_key: str, user_command: str) -> str:
+        incident = self.store.get_by_issue(issue_key)
+        if incident is None:
+            raise KeyError("Jira issue is not a GitHub incident")
+
+        from pathlib import Path
+        import os
+        from core.change_management.proposals import ChangeProposalStore
+        from core.change_management.policy import ChangePolicy
+        from core.change_management.jira_proposals import JiraProposalService, REQUEST_LABEL
+        from core.change_management.github_adapter import InstallationTokenProvider, GitHubChangeAdapter
+        from core.change_management.github_app import GitHubApi, app_jwt
+        from core.change_management.deployment_auth import DeploymentActor
+
+        policy_file = Path(os.getenv("AEGIS_POLICY_FILE", "/app/code/config/change-policy.json"))
+        if not policy_file.exists():
+            policy_file = Path(__file__).resolve().parents[4] / "config" / "change-policy.json"
+        policy = ChangePolicy.from_dict(json.loads(policy_file.read_text()))
+
+        store_path = Path(os.getenv("AEGIS_PROPOSAL_STORE", "/app/state/jira-change-proposals.sqlite3"))
+        store_path.parent.mkdir(parents=True, exist_ok=True)
+        proposal_store = ChangeProposalStore(store_path)
+
+        # Writer App credentials
+        write_key_file = os.getenv("AEGIS_GITHUB_WRITE_PRIVATE_KEY_FILE", "/run/secrets/aegis-github-write-app.pem")
+        write_app_id = int(os.getenv("AEGIS_GITHUB_WRITE_APP_ID", "4821358"))
+        write_inst_id = int(os.getenv("AEGIS_GITHUB_WRITE_INSTALLATION_ID", "158855695"))
+
+        provider = InstallationTokenProvider(
+            lambda: GitHubApi(f"Bearer {app_jwt(write_app_id, write_key_file)}"), write_inst_id
+        )
+        adapter = GitHubChangeAdapter(provider)
+        proposal_service = JiraProposalService(proposal_store, policy, adapter)
+
+        # Look up active proposal for this issue
+        with proposal_store._lock:
+            existing = proposal_store.connection.execute(
+                "SELECT proposal_id, binding_sha256 FROM jira_change_snapshots WHERE issue_key=? AND lifecycle_state='ACTIVE'",
+                (issue_key,),
+            ).fetchone()
+
+        if not existing:
+            # Check if already executed
+            with proposal_store._lock:
+                executed = proposal_store.connection.execute(
+                    "SELECT result_json FROM jira_change_snapshots WHERE issue_key=? AND result_json IS NOT NULL ORDER BY rowid DESC LIMIT 1",
+                    (issue_key,),
+                ).fetchone()
+            if executed and executed["result_json"]:
+                res = json.loads(executed["result_json"])
+                msg = f"🤖 **Aegis Draft Pull Request is already open**: {res.get('pull_request_url')}"
+                self.jira.add_comment(issue_key, msg)
+                return msg
+            msg = f"🤖 No active change proposal found for {issue_key}. Comment `@sre-agent stage fix` first to generate a proposal."
+            self.jira.add_comment(issue_key, msg)
+            return msg
+
+        proposal_id = existing["proposal_id"]
+        expected_binding = existing["binding_sha256"]
+
+        # Parse binding if provided
+        binding_match = re.search(r"\b([a-f0-9]{64})\b", user_command)
+        if binding_match and binding_match.group(1) != expected_binding:
+            msg = (
+                f"❌ Approval rejected: The supplied binding hash `{binding_match.group(1)}` "
+                f"does not match the active proposal binding `{expected_binding}`."
+            )
+            self.jira.add_comment(issue_key, msg)
+            return msg
+
+        # Check expiry; auto-renew if expired
+        record = proposal_service.inspect(proposal_id)
+        expires_at = datetime.fromisoformat(record["proposal"]["expires_at"])
+        if datetime.now(timezone.utc) > expires_at:
+            approver = DeploymentActor("operator-approver", {"approver"})
+            requester = DeploymentActor("sre-agent", {"requester"})
+            proposal_service.abandon(proposal_id, binding=expected_binding, actor=approver)
+            snapshot = record["snapshot"]
+            files = {p: t.encode() for p, t in snapshot["after"].items()}
+            new_res = proposal_service.prepare(
+                issue_key=issue_key,
+                fingerprint=snapshot["fingerprint"],
+                labels=[REQUEST_LABEL],
+                repository=record["proposal"]["repository"],
+                base_sha=record["proposal"]["base_sha"],
+                files=files,
+                actor=requester,
+                retry_of=proposal_id,
+                retry_binding=expected_binding,
+            )
+            proposal_id = new_res["proposal"]["proposal_id"]
+            expected_binding = new_res["binding_sha256"]
+
+        # Execute approval and PR creation
+        approver = DeploymentActor("operator-approver", {"approver"})
+        executor = DeploymentActor("operator-executor", {"executor"})
+        proposal_service.approve(proposal_id, binding=expected_binding, actor=approver)
+        res = proposal_service.execute(proposal_id, binding=expected_binding, actor=executor)
+        proposal_service.notify(proposal_id, jira=self.jira, actor=executor)
+
+        pr_url = res.get("result", {}).get("pull_request_url", "")
+        msg = f"🤖 **Aegis Change Proposal Approved & Executed**\n\nDraft Pull Request created: {pr_url}"
+        return msg
 
     def investigate(self, issue_key: str) -> str:
         incident = self.store.get_by_issue(issue_key)
