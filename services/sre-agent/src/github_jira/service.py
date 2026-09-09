@@ -173,7 +173,19 @@ class GitHubJiraWorkflow:
             raise KeyError("Jira issue is not a GitHub incident")
 
         cmd = user_command.casefold()
-        is_create_pr = any(phrase in cmd for phrase in ("create pr", "open pr", "draft pr", "make pr", "approve"))
+        is_create_pr = any(
+            phrase in cmd
+            for phrase in (
+                "create pr",
+                "open pr",
+                "draft pr",
+                "make pr",
+                "pull request",
+                "create pull request",
+                "open pull request",
+                "approve",
+            )
+        )
         if is_create_pr:
             return self.approve_and_execute_proposal(issue_key, user_command)
         if any(w in cmd for w in ("stage", "propose", "fix", "solution")):
