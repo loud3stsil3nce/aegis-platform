@@ -268,12 +268,42 @@ class GitHubJiraWorkflow:
             if not base_sha:
                 base_sha = incident.commit_sha
 
-            # Synthesize fix snapshot
-            target_path = None
-            new_content = None
+            # 1. Attempt autonomous LLM traceback diagnosis and multi-file patch synthesis
+            from .llm_synthesizer import synthesize_patch_with_llm
 
-            if incident.repository == "loud3stsil3nce/shariahcompliantscreener":
-                # 1. Check helpers.py for DATABASE_URL fix
+            patch_files: dict[str, bytes] = {}
+            explanation = ""
+
+            log_text = ""
+            if incident.evidence and incident.evidence.logs:
+                log_text = incident.evidence.logs
+            elif incident.run_id and incident.source_kind == "workflow_run":
+                try:
+                    evidence = self.github.fetch_evidence(incident.as_event())
+                    for job in evidence.jobs:
+                        if job.get("conclusion") == "failure":
+                            raw_log = self.github._download_job_log(incident.repository, job["id"])
+                            log_text = raw_log.decode("utf-8", errors="replace")
+                            break
+                except Exception:
+                    pass
+
+            if log_text:
+                synth_result = synthesize_patch_with_llm(
+                    repository=incident.repository,
+                    base_sha=base_sha,
+                    log_text=log_text,
+                    github=self.github,
+                    symptom=incident.symptom,
+                    likely_cause=incident.likely_cause,
+                )
+                if synth_result and synth_result.files:
+                    patch_files = synth_result.files
+                    explanation = f"💡 **Autonomous Diagnosis** ({synth_result.provider}/{synth_result.model}):\n{synth_result.explanation}\n\n"
+
+            # 2. Fallback to static template rules if LLM synthesis did not generate a patch
+            if not patch_files and incident.repository == "loud3stsil3nce/shariahcompliantscreener":
+                # Check helpers.py for DATABASE_URL fix
                 helpers_path = "src/db/helpers.py"
                 try:
                     helpers_raw = self.github.get_file_content(incident.repository, helpers_path, base_sha)
@@ -288,13 +318,12 @@ class GitHubJiraWorkflow:
                         '        raise RuntimeError("DATABASE_URL is required")'
                     )
                     if old_helpers in helpers_text:
-                        target_path = helpers_path
-                        new_content = helpers_text.replace(old_helpers, new_helpers)
+                        patch_files[helpers_path] = (helpers_text.replace(old_helpers, new_helpers).rstrip() + "\n").encode("utf-8")
                 except Exception:
                     pass
 
-                # 2. If helpers.py already has the fix, check gemini_client.py
-                if not target_path or not new_content:
+                # If helpers.py already has the fix, check gemini_client.py
+                if not patch_files:
                     gemini_path = "src/ai/gemini_client.py"
                     try:
                         gemini_raw = self.github.get_file_content(incident.repository, gemini_path, base_sha)
@@ -309,21 +338,17 @@ class GitHubJiraWorkflow:
                                 f"{indent}if not active_key and passed_client is None:\n"
                                 f"{indent}    return {{'error': 'Gemini API Key not found.'}}"
                             )
-                            target_path = gemini_path
-                            new_content = re.sub(pattern, replacement, gemini_text)
+                            patch_files[gemini_path] = (re.sub(pattern, replacement, gemini_text).rstrip() + "\n").encode("utf-8")
                     except Exception:
                         pass
 
-            if not target_path or not new_content:
+            if not patch_files:
                 msg = (
                     f"🤖 SRE Agent: Could not automatically synthesize a verified patch for {incident.repository}.\n"
                     f"Please inspect the evidence and prepare a snapshot using scripts/jira_change_proposal.py."
                 )
                 self.jira.add_comment(issue_key, msg)
                 return msg
-
-            # Ensure valid UTF-8 LF text with a final newline per policy
-            new_content = new_content.rstrip() + "\n"
 
             # Prepare and stage the proposal
             actor = DeploymentActor("sre-agent", {"requester"})
@@ -333,7 +358,7 @@ class GitHubJiraWorkflow:
                 labels=[REQUEST_LABEL],
                 repository=incident.repository,
                 base_sha=base_sha,
-                files={target_path: new_content.encode("utf-8")},
+                files=patch_files,
                 actor=actor,
             )
 
@@ -344,6 +369,7 @@ class GitHubJiraWorkflow:
 
             message = (
                 f"🤖 **SRE Agent Change Proposal Staged**\n\n"
+                f"{explanation}"
                 f"A candidate fix was generated and staged under the Aegis Change Policy:\n\n"
                 f"- **Repository**: `{incident.repository}`\n"
                 f"- **Base Commit**: `{base_sha[:12]}`\n"

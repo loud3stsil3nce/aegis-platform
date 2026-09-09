@@ -302,6 +302,39 @@ class GitHubReadClient:
             return base64.b64decode(data["content"])
         raise GitHubReadError(f"unable to read file content for {path} at {ref}")
 
+    def get_tree(self, repository: str, ref: str) -> list[str]:
+        """Fetch all blob file paths in the repository at ref using Git Trees API."""
+        try:
+            data = self._json(repository, f"{self._root(repository)}/git/trees/{urllib.parse.quote(ref)}?recursive=1")
+            if isinstance(data, dict) and "tree" in data and isinstance(data["tree"], list):
+                return [
+                    item["path"]
+                    for item in data["tree"]
+                    if isinstance(item, dict) and item.get("type") == "blob" and isinstance(item.get("path"), str)
+                ]
+        except Exception:
+            pass
+        return []
+
+    def get_multiple_files(
+        self, repository: str, paths: Iterable[str], ref: str, max_total_bytes: int = 262_144
+    ) -> dict[str, str]:
+        """Fetch contents of multiple project files, up to a bounded total byte budget."""
+        results: dict[str, str] = {}
+        total_bytes = 0
+        for path in paths:
+            if total_bytes >= max_total_bytes:
+                break
+            try:
+                content = self.get_file_content(repository, path, ref)
+                if total_bytes + len(content) > max_total_bytes:
+                    content = content[: max_total_bytes - total_bytes]
+                results[path] = content.decode("utf-8", errors="replace")
+                total_bytes += len(content)
+            except Exception:
+                continue
+        return results
+
     @staticmethod
     def _summary(item: dict[str, Any], keys: tuple[str, ...]) -> dict[str, Any]:
         return {key: item.get(key) for key in keys if item.get(key) is not None}
