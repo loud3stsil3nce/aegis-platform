@@ -346,10 +346,24 @@ class GitHubJiraWorkflow:
                     except Exception:
                         pass
 
+            # Filter out any files that are identical to baseline at base_sha
+            filtered_files: dict[str, bytes] = {}
+            for path, new_bytes in patch_files.items():
+                try:
+                    base_raw = self.github.get_file_content(incident.repository, path, base_sha)
+                    base_clean = base_raw.decode("utf-8", errors="replace").replace("\r\n", "\n").rstrip() + "\n"
+                    new_clean = new_bytes.decode("utf-8", errors="replace").replace("\r\n", "\n").rstrip() + "\n"
+                    if base_clean == new_clean:
+                        continue
+                except Exception:
+                    pass
+                filtered_files[path] = new_bytes
+            patch_files = filtered_files
+
             if not patch_files:
                 msg = (
-                    f"🤖 SRE Agent: Could not automatically synthesize a verified patch for {incident.repository}.\n"
-                    f"Please inspect the evidence and prepare a snapshot using scripts/jira_change_proposal.py."
+                    f"🤖 **Aegis Change Notice**: The proposed changes for {issue_key} are already present on `{base_branch}` "
+                    f"(commit `{base_sha[:12]}`). No code modifications are required."
                 )
                 self.jira.add_comment(issue_key, msg)
                 return msg
