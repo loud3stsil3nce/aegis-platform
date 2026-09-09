@@ -1,5 +1,11 @@
 {
-  "repositories": ["loud3stsil3nce/aegis-platform"],
+  "repositories": [
+    "loud3stsil3nce/aegis-platform",
+    "loud3stsil3nce/shariahcompliantscreener",
+    "loud3stsil3nce/ReefTracker",
+    "loud3stsil3nce/E2EE-Messaging-Project",
+    "loud3stsil3nce/server-dash"
+  ],
   "baseBranches": ["main"],
   "allowedPathPrefixes": [
     "core",
@@ -10,7 +16,13 @@
     "docs",
     "examples",
     "scripts",
-    "services/docker_deployment"
+    "services/docker_deployment",
+    "src",
+    "backend",
+    "frontend",
+    "ReefTracker",
+    "tests",
+    "public"
   ],
   "proposedBranchPrefix": "aegis/",
   "maxFiles": 20,

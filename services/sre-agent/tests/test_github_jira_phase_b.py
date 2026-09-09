@@ -109,6 +109,24 @@ class PhaseBRequestTests(unittest.TestCase):
         self.assertEqual(record["repository"], REPOSITORY)
         self.assertEqual(before, self.path.read_bytes())
 
+    def test_handle_command_stage_fix_routes_to_stage_proposal(self):
+        with patch.object(self.workflow, "stage_proposal", return_value="staged-message") as mocked:
+            res = self.workflow.handle_command("KAN-101", "stage fix")
+            self.assertEqual(res, "staged-message")
+            mocked.assert_called_once_with("KAN-101")
+
+    def test_handle_command_propose_and_stage_solution_routes_to_stage_proposal(self):
+        with patch.object(self.workflow, "stage_proposal", return_value="staged-solution") as mocked:
+            res = self.workflow.handle_command("KAN-101", "propose and stage a solution")
+            self.assertEqual(res, "staged-solution")
+            mocked.assert_called_once_with("KAN-101")
+
+    def test_approve_command_directs_operator_and_does_not_execute(self):
+        with patch.object(self.workflow, "approve_and_execute_proposal", return_value="operator-policy") as mocked:
+            res = self.workflow.handle_command("KAN-101", "approve 6b756b7eea625d9c648e10f906c2e66120ebfa2806bc414f09f5f979973cbaf3")
+            self.assertEqual(res, "operator-policy")
+            mocked.assert_called_once_with("KAN-101", "approve 6b756b7eea625d9c648e10f906c2e66120ebfa2806bc414f09f5f979973cbaf3")
+
 
 if __name__ == "__main__":
     unittest.main()

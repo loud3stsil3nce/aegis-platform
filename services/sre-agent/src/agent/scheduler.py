@@ -60,7 +60,7 @@ def _extract_marker_command(text):
 async def run_agent_command_safe(issue_key: str, user_command: str):
     try:
         print(f"[Polling] Launching sweep for issue {issue_key} with command: '{user_command}'", flush=True)
-        if await dispatch_github_incident(issue_key):
+        if await dispatch_github_incident(issue_key, user_command):
             return
         await execute_agent_sweep(issue_key=issue_key, user_command=user_command)
     except Exception as e:
@@ -143,12 +143,14 @@ async def poll_github_failures_job():
     workflow = get_workflow()
     if workflow is None:
         return
-    repository = os.getenv("AEGIS_GITHUB_ALLOWED_REPOSITORIES", "")
+    raw_repos = os.getenv("AEGIS_GITHUB_ALLOWED_REPOSITORIES", "")
+    repos = [r.strip() for r in raw_repos.split(",") if r.strip()]
     lookback = int(os.getenv("AEGIS_GITHUB_POLL_LOOKBACK_MINUTES", "15"))
-    try:
-        await asyncio.to_thread(workflow.poll_repository, repository, lookback)
-    except Exception as e:
-        print(f"[GitHub Polling] Recovery poll failed: {type(e).__name__}", flush=True)
+    for repository in repos:
+        try:
+            await asyncio.to_thread(workflow.poll_repository, repository, lookback)
+        except Exception as e:
+            print(f"[GitHub Polling] Recovery poll failed for {repository}: {type(e).__name__}", flush=True)
 
 async def poll_github_ci_job():
     try:

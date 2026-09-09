@@ -82,8 +82,8 @@ def review_diff(before: dict[str, str | None], after: dict[str, str]) -> str:
 
 class JiraProposalService:
     def __init__(self, store: ChangeProposalStore, policy: ChangePolicy, adapter: GitHubChangeAdapter):
-        if policy.repositories != frozenset({REPOSITORY}) or policy.base_branches != frozenset({"main"}):
-            raise ChangeApprovalError("Phase B requires exactly the platform repository and main base")
+        if not policy.repositories or policy.base_branches != frozenset({"main"}):
+            raise ChangeApprovalError("Phase B requires an allowlisted repository set and main base")
         self.store, self.policy, self.adapter = store, policy, adapter
         with store._lock, store.connection:
             store.connection.executescript(
@@ -132,7 +132,7 @@ class JiraProposalService:
     ) -> dict[str, Any]:
         require_role(actor, "requester")
         if (
-            REQUEST_LABEL not in labels or repository != REPOSITORY
+            REQUEST_LABEL not in labels or repository not in self.policy.repositories
             or not re.fullmatch(r"[A-Z][A-Z0-9_]{1,20}-[1-9][0-9]*", issue_key)
             or not re.fullmatch(r"[a-f0-9]{64}", fingerprint)
             or not re.fullmatch(r"[a-f0-9]{40}", base_sha)
@@ -189,7 +189,7 @@ class JiraProposalService:
                     (proposal["proposal_id"], issue_key, canonical(payload), binding, retry_of),
                 )
                 if retry_of:
-                    self.store._event(proposal["proposal_id"], REPOSITORY, "RETRY_PREPARED",
+                    self.store._event(proposal["proposal_id"], repository, "RETRY_PREPARED",
                                       actor.actor_id, f"new approval required; predecessor {retry_of}")
         return self.inspect(proposal["proposal_id"])
 
@@ -258,7 +258,8 @@ class JiraProposalService:
             self.store.connection.execute(
                 "UPDATE jira_change_snapshots SET lifecycle_state='ABANDONED' WHERE proposal_id=?", (proposal_id,),
             )
-            self.store._event(proposal_id, REPOSITORY, "ABANDONED", actor.actor_id,
+            repo = record["proposal"]["repository"]
+            self.store._event(proposal_id, repo, "ABANDONED", actor.actor_id,
                               "authorization retired; remote PR and branch preserved; retry requires fresh approval")
         return self.inspect(proposal_id)
 
@@ -279,7 +280,7 @@ class JiraProposalService:
                     continue
                 records.append({
                     "proposal_id": proposal["proposal_id"], "issue_key": snapshot["issue_key"],
-                    "repository": REPOSITORY, "binding_sha256": record["binding_sha256"],
+                    "repository": proposal["repository"], "binding_sha256": record["binding_sha256"],
                     "base_sha": proposal["base_sha"], "base_branch": proposal["base_branch"],
                     "branch": proposal["proposed_branch"], "lifecycle_state": record["lifecycle_state"],
                     "result": result,
@@ -346,12 +347,17 @@ class JiraProposalService:
         except Exception:
             # Denials must commit separately from failed validation transactions.
             with self.store._lock, self.store.connection:
-                self.store._event(proposal_id, REPOSITORY, "EXECUTION_DENIED", actor.actor_id, "Phase B exact binding rejected")
+                try:
+                    repo = self.store.get(proposal_id)["repository"]
+                except Exception:
+                    repo = "unknown"
+                self.store._event(proposal_id, repo, "EXECUTION_DENIED", actor.actor_id, "Phase B exact binding rejected")
             raise
 
         # A consumed proposal is never retried, even if the process dies or a
         # GitHub response is lost. Jira notification is a separate operation.
         try:
+            repo = proposal["repository"]
             result = self.adapter.create_pull_request(
                 change, expected_base_sha=proposal["base_sha"],
                 files={path: text.encode() for path, text in payload["after"].items()},
@@ -362,9 +368,9 @@ class JiraProposalService:
                 body=f"Proposal: {proposal_id}\nBinding SHA-256: {binding}\nIncident: {payload['fingerprint']}\n"
                      "Draft only. Human review and merge are separate; no deployment is authorized.",
             )
-            expected_url = f"https://github.com/{REPOSITORY}/pull/{result.pull_request_number}"
+            expected_url = f"https://github.com/{repo}/pull/{result.pull_request_number}"
             if (
-                result.repository != REPOSITORY or result.branch != change.proposed_branch
+                result.repository != repo or result.branch != change.proposed_branch
                 or not re.fullmatch(r"[a-f0-9]{40}", result.commit_sha)
                 or type(result.pull_request_number) is not int or result.pull_request_number <= 0
                 or result.pull_request_url != expected_url
@@ -376,7 +382,7 @@ class JiraProposalService:
                     (canonical(asdict(result)), proposal_id),
                 )
                 self.store._event(
-                    proposal_id, REPOSITORY, "SUCCESS", actor.actor_id, canonical(asdict(result)),
+                    proposal_id, repo, "SUCCESS", actor.actor_id, canonical(asdict(result)),
                 )
         except Exception:
             self.store.record_execution(
@@ -411,7 +417,8 @@ class JiraProposalService:
             self.store.connection.execute(
                 "UPDATE jira_change_snapshots SET notification_state='SENT' WHERE proposal_id=?", (proposal_id,),
             )
-            self.store._event(proposal_id, REPOSITORY, "JIRA_NOTIFIED", actor.actor_id, "draft PR linked to bound issue")
+            repo = record["proposal"]["repository"]
+            self.store._event(proposal_id, repo, "JIRA_NOTIFIED", actor.actor_id, "draft PR linked to bound issue")
 
     def merge_proposal(
         self, proposal_id: str, *, binding: str, actor: DeploymentActor, github_api: Any = None,
@@ -430,11 +437,12 @@ class JiraProposalService:
         if record["lifecycle_state"] != "ACTIVE":
             raise ChangeApprovalError("cannot merge inactive or abandoned proposal")
 
+        repo = proposal["repository"]
         pr_num = record["result"]["pull_request_number"]
-        root = f"/repos/{REPOSITORY}"
+        root = f"/repos/{repo}"
         api = github_api
         if api is None:
-            api = self.adapter.token_provider.issue(REPOSITORY, write=True)
+            api = self.adapter.token_provider.issue(repo, write=True)
 
         # 1. Check PR state and mergeable status
         pr = api.request("GET", f"{root}/pulls/{pr_num}")
@@ -466,7 +474,7 @@ class JiraProposalService:
                 (merge_sha, proposal_id),
             )
             self.store._event(
-                proposal_id, REPOSITORY, "MERGED", actor.actor_id,
+                proposal_id, repo, "MERGED", actor.actor_id,
                 canonical({"pull_request_number": pr_num, "merge_commit_sha": merge_sha}),
             )
         return {
@@ -493,4 +501,5 @@ class JiraProposalService:
             "aegis:merged",
         )
         with self.store._lock, self.store.connection:
-            self.store._event(proposal_id, REPOSITORY, "JIRA_MERGE_NOTIFIED", actor.actor_id, "PR merge posted to Jira")
+            repo = record["proposal"]["repository"]
+            self.store._event(proposal_id, repo, "JIRA_MERGE_NOTIFIED", actor.actor_id, "PR merge posted to Jira")
