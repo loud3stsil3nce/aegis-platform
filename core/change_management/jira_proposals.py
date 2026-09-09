@@ -45,7 +45,7 @@ def require_role(actor: DeploymentActor, role: str) -> None:
         raise PermissionError("operator role is not authorized")
 
 
-def snapshot_text(files: dict[str, bytes]) -> dict[str, str]:
+def snapshot_text(files: dict[str, bytes], *, allow_missing_final_newline: bool = False) -> dict[str, str]:
     if not files or sum(len(value) for value in files.values()) > MAX_SNAPSHOT_BYTES:
         raise ChangeApprovalError("snapshot is empty or exceeds the byte budget")
     result = {}
@@ -56,8 +56,11 @@ def snapshot_text(files: dict[str, bytes]) -> dict[str, str]:
         ):
             raise ChangeApprovalError("snapshot path is not a normalized permitted file")
         text = content.decode("utf-8")
-        if "\x00" in text or "\r" in text or (text and not text.endswith("\n")):
-            raise ChangeApprovalError("only UTF-8 LF text with a final newline is supported")
+        if "\x00" in text or "\r" in text:
+            raise ChangeApprovalError("only UTF-8 LF text is supported")
+        if text and not text.endswith("\n"):
+            if not allow_missing_final_newline:
+                raise ChangeApprovalError("only UTF-8 LF text with a final newline is supported")
         result[path] = text
     return result
 
@@ -165,7 +168,7 @@ class JiraProposalService:
                 raise ChangeApprovalError("issue already has a proposal; inspect it, never silently rewrite")
             before_bytes = self.adapter.read_snapshot(probe, expected_base_sha=base_sha)
             before = {
-                path: None if value is None else snapshot_text({path: value})[path]
+                path: None if value is None else snapshot_text({path: value}, allow_missing_final_newline=True)[path]
                 for path, value in before_bytes.items()
             }
             diff = review_diff(before, after)

@@ -62,6 +62,9 @@ class JiraIncidentAdapter:
         issue = self.client.issue(issue_key, fields="labels")
         return list(getattr(issue.fields, "labels", []) or [])
 
+    def add_comment(self, issue_key: str, message: str) -> None:
+        self.client.add_comment(issue_key, message)
+
     def add_proposal_update(self, issue_key: str, message: str, state_label: str) -> None:
         if state_label not in {"aegis:approval-required", "aegis:pr-open"}:
             raise ValueError("unsupported proposal state")
