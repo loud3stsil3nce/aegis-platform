@@ -13,6 +13,7 @@ from typing import Any, Iterable, Mapping, Optional
 from .github import GitHubEvidence, GitHubReadClient
 from .models import MAX_EVENT_BYTES, FailureEvent, IncidentRecord, parse_failure_webhook
 from .security import (
+    MAX_LOG_BYTES,
     WebhookAuthenticationError,
     validate_delivery_id,
     verify_github_signature,
@@ -280,11 +281,16 @@ class GitHubJiraWorkflow:
                     evidence = self.github.fetch_evidence(incident.as_event())
                     for job in evidence.jobs:
                         if job.get("conclusion") == "failure" and "id" in job:
-                            raw_log = self.github._download_job_log(incident.repository, job["id"])
+                            raw_log = self.github._download_job_log(
+                                incident.repository, job["id"], max_bytes=MAX_LOG_BYTES
+                            )
                             log_text = raw_log.decode("utf-8", errors="replace")
                             break
-                except Exception:
-                    pass
+                except Exception as exc:
+                    import logging
+                    logging.getLogger(__name__).warning(
+                        f"Failed to fetch job log for {incident.repository} run {incident.run_id}: {exc}"
+                    )
 
             if log_text:
                 synth_result = synthesize_patch_with_llm(

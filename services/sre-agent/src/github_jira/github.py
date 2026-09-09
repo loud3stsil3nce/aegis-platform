@@ -188,6 +188,14 @@ def _read_limited(response: Any, max_bytes: int) -> bytes:
     return raw
 
 
+def _read_tail(response: Any, max_bytes: int) -> bytes:
+    """Read a response and bound to max_bytes, keeping the tail where tracebacks are."""
+    raw = response.read()
+    if len(raw) > max_bytes:
+        return raw[-max_bytes:]
+    return raw
+
+
 class GitHubReadClient:
     """Expose only the GitHub GET operations required for incident diagnosis."""
 
@@ -242,7 +250,7 @@ class GitHubReadClient:
             self.sleep(0.1 * (2**attempt))
         raise GitHubReadError("GitHub read retry budget exhausted")
 
-    def _download_job_log(self, repository: str, job_id: int, max_bytes: int) -> bytes:
+    def _download_job_log(self, repository: str, job_id: int, max_bytes: int = MAX_LOG_BYTES) -> bytes:
         """Follow only GitHub's HTTPS log redirect and never forward authorization."""
 
         root = self._root(repository)
@@ -284,7 +292,7 @@ class GitHubReadClient:
         )
         try:
             with urllib.request.urlopen(redirected, timeout=15) as response:
-                return _read_limited(response, max_bytes)
+                return _read_tail(response, max_bytes)
         except (urllib.error.HTTPError, urllib.error.URLError) as exc:
             raise GitHubReadError("GitHub job-log download failed") from exc
 
